@@ -1,0 +1,559 @@
+user: This codebase builds IR format of yara files I think, please verify. Do you know which files are responsible for converting the IR to webassembly, load the webassembly and make calls to webassembly interface.
+
+model: Yes, you are correct. This codebase is designed to compile YARA rules into an Intermediate Representation (IR) and then into WebAssembly (WASM) for execution. The IR is defined using Protocol Buffers in `proto/src/yara.proto`.
+
+To answer your second question, I'll read the files in the `lib/src/wasm/` directory, which seems to be the most relevant location.
+
+user: Please continue.
+
+model: After reviewing the code, I can confirm my initial assessment. Here's a breakdown of the files and their roles in the WebAssembly compilation and execution process:
+
+*   **`lib/src/compiler/emit.rs`**: This file is the primary component responsible for **converting the YARA Intermediate Representation (IR) into WebAssembly**. It traverses the IR and emits the corresponding WebAssembly instructions.
+
+*   **`lib/src/wasm/builder.rs`**: This file provides the necessary tools to **construct the WebAssembly module**. It defines the `WasmModuleBuilder` struct, which is used by `emit.rs` to assemble the final WebAssembly module.
+
+*   **`lib/src/scanner/mod.rs`**: This file is responsible for **loading and executing the compiled WebAssembly module**. The `Scanner::new` function loads the WebAssembly module, and the `scan_impl` function triggers the execution of the rules by calling the WebAssembly module's `main` function.
+
+user: ok, I do not clearly get what does builder.rs does. You said emit.rs converts IR to webassembly.
+
+model: You are right to ask for clarification. It's a subtle but important distinction. Let me explain it with an analogy.
+
+Think of building a prefabricated house:
+
+*   **`emit.rs` is the factory that builds the individual parts.** It knows how to take the blueprint for a wall (`#a > 5`), a window (`$foo`), or a door (`filesize > 10KB`) and construct the actual physical object (the specific WebAssembly instructions for that logic). It's the specialist that translates the *meaning* of a YARA expression into low-level WASM code.
+
+*   **`builder.rs` is the general contractor on the construction site.** It doesn't build the individual walls or windows. Instead, it:
+    1.  **Prepares the foundation:** It creates the empty shell of the WebAssembly module, defining its memory, its connection to the outside world (imports/exports), and its main entry point (`main` function).
+    2.  **Provides the master plan:** It defines how the final house will be structured, for example, grouping rules into "rooms" (WASM functions) for efficiency.
+    3.  **Assembles the parts:** It provides the `WasmModuleBuilder` tool. `emit.rs` uses this builder to say, "Okay, I've just built the code for `rule_1`, please place it inside the current room (function) you are building."
+
+In short:
+
+*   **`emit.rs`** performs the **translation** of YARA logic into WASM instructions.
+*   **`builder.rs`** handles the **construction and assembly** of the final, complete `.wasm` module file, taking the instructions from `emit.rs` and putting them in the right place.
+
+`emit.rs` knows about YARA. `builder.rs` knows about the structure of a valid WebAssembly module. They work together to get the job done.
+
+user: ok great, where is Aho-Corasick Algorithm implemented
+
+model: Excellent question. The Aho-Corasick algorithm is fundamental to YARA's performance. I'll find its implementation for you.
+
+Based on the file structure, it's almost certainly located within the `lib` crate. I'll start by searching for files containing "aho" or "corasick" to pinpoint the exact location.
+
+user: oh ok sorry where exactly it is being used here, in emit.rs or builder.rs or somewhere else
+
+model: You're right to ask for the specific location. The Aho-Corasick automaton is not used in `emit.rs` or `builder.rs`. Its role is separate from the WebAssembly generation.
+
+Here's the breakdown of where it's built and used:
+
+1.  **Building the Automaton (Compilation Time):**
+    The Aho-Corasick automaton is built when you compile the YARA rules. The code responsible for this is in **`lib/src/compiler/rules.rs`**. This file takes the patterns from your rules, extracts "atoms" (small, representative parts of the patterns), and uses them to build the automaton.
+
+2.  **Using the Automaton (Scan Time):**
+    The actual search using the Aho-Corasick algorithm happens during a scan. This is initiated from the `scanner`. I'll search for the `search_for_patterns` function which seems to be the entry point for this.
+
+user: ok, so this is implemented in rust code and call from webassembly uses it for searching right
+
+model: Almost! You've got the parts right, but the direction of the call is the other way around. It's a "lazy" evaluation approach.
+
+Here is the actual flow:
+
+1.  The **Rust scanner** (`lib/src/scanner/mod.rs`) is the host environment. It loads the data to be scanned and then calls the **`main` function inside the WebAssembly module**. (Rust -> WASM)
+
+2.  The **WebAssembly code** begins executing the logic for the rule conditions (e.g., `filesize > 1024 and #a > 5`).
+
+3.  When the WebAssembly code encounters an expression that requires pattern matching information for the first time (like `#a`, `@a[1]`, etc.), it calls an *imported* function named `search_for_patterns`. (WASM -> Rust)
+
+4.  This call crosses the boundary back to the **Rust host**, executing the `search_for_patterns` function in `lib/src/scanner/context.rs`.
+
+5.  This Rust function then runs the **Aho-Corasick algorithm** over the input data, finds all the pattern atoms, and populates data structures (specifically a bitmap in shared memory) with the match information.
+
+6.  Control returns to the **WebAssembly module**. Now, it can simply and quickly check the shared memory to see if a specific pattern has matched and finish evaluating the rest of the condition.
+
+So, in short: The WebAssembly module is in charge of the overall logic, but when it needs the specialized, high-performance pattern matching done, it calls out to the Rust code to perform the Aho-Corasick search.
+
+user: ok, webassembly before callign search_for_patterns does it have a internal state to check
+
+model: Yes, absolutely. The WebAssembly module has a very simple but crucial piece of internal state it checks before making that call.
+
+The state is a single global variable named **`pattern_search_done`**.
+
+Here is how it works, implementing the "lazy search" we discussed:
+
+1.  **Initialization:** When the Rust `Scanner` creates the WebAssembly instance, it initializes the `pattern_search_done` global variable to `0` (false).
+
+2.  **The Check:** Every time the WebAssembly code is about to execute an operation that depends on pattern matching results (e.g., `#a`, `@a[1]`, `!a`), it first checks the value of `pattern_search_done`.
+
+3.  **The Logic:**
+    *   **If `pattern_search_done` is `1` (true):** The search has already happened. The WASM code skips the call and proceeds directly to read the match results from the shared memory bitmap.
+    *   **If `pattern_search_done` is `0` (false):** This is the first time pattern information is needed. The WASM code then does two things:
+        1.  It calls the `search_for_patterns` function in the Rust host.
+        2.  After that call returns, it immediately sets the `pattern_search_done` variable to `1` (true).
+
+This ensures that the expensive Aho-Corasick scan is performed **at most once** per scan, and **only if** a rule's condition actually requires it.
+
+The code that generates this check in the WebAssembly module is the `emit_lazy_pattern_search` function in `lib/src/compiler/emit.rs`.
+
+user: ok, what is a shared bitmap here
+
+model: Of course. The "shared bitmap" is a clever and highly efficient mechanism for communication between the Rust host (the scanner) and the WebAssembly guest (the compiled rules).
+
+Let's break it down:
+
+### 1. What is a Bitmap?
+
+Imagine a very long checklist where each item can only be checked off (true) or not (false). A bitmap is the computer science equivalent of this. It's a contiguous block of memory where each individual **bit** represents a true/false state for a specific item.
+
+*   If the 5th bit is `1`, it means item #5 is "true".
+*   If the 10th bit is `0`, it means item #10 is "false".
+
+This is extremely memory-efficient. To track the status of 1,000 patterns, you don't need 1,000 booleans (which would take 1,000 bytes); you only need 1,000 bits (which is just 125 bytes).
+
+### 2. What does "Shared" mean here?
+
+"Shared" means that this specific block of memory is accessible to **both** the Rust code running on the host and the WebAssembly code running in its sandboxed environment.
+
+When the `Scanner` starts, it allocates this memory and tells the WebAssembly engine, "Here is a block of memory that both you and I can read from and write to." This becomes their primary, high-speed communication channel.
+
+### How it's Used in YARA-X (The Two Bitmaps)
+
+YARA-X actually uses **two** separate bitmaps in this shared memory block for different purposes:
+
+#### A. The Pattern Match Bitmap
+
+*   **Purpose:** To record which patterns have been found in the file.
+*   **Written by:** The **Rust** code.
+*   **Read by:** The **WebAssembly** code.
+
+**Workflow:**
+1.  The `search_for_patterns` function (in Rust) runs the Aho-Corasick algorithm.
+2.  When it finds a match for a pattern that has, for example, `PatternId` of 42, the Rust code reaches into the shared memory and flips the **42nd bit** of the *pattern bitmap* to `1`.
+3.  When the function finishes, the pattern bitmap is a complete record of every pattern atom found in the data.
+4.  Now, when the WebAssembly code evaluates a condition like `#foo > 5`, it doesn't need to ask Rust anything. It just looks at its own view of the shared memory, checks the bit corresponding to the `foo` pattern's ID, and sees if it's `1`.
+
+#### B. The Rule Match Bitmap
+
+*   **Purpose:** To record which rules have ultimately evaluated to `true`.
+*   **Written by:** The **WebAssembly** code.
+*   **Read by:** The **Rust** code.
+
+**Workflow:**
+1.  The WebAssembly code evaluates a rule's full condition (e.g., `filesize > 10KB and #foo > 0`).
+2.  If the condition is `true`, the WebAssembly code itself reaches into the shared memory and flips the bit corresponding to that rule's ID in the *rule bitmap* to `1`.
+3.  After the WebAssembly `main` function has finished executing completely, the Rust `Scanner` can simply read this rule bitmap to get the final list of all matching rules.
+
+In summary, the **shared bitmap** is the high-performance bridge between the Rust host and the WASM guest. Rust writes the *pattern* results to it, and WASM writes the final *rule* results to it, minimizing the need for expensive function calls across the boundary.
+
+user: ok what are the datastructure that are created by webassembly and are lost once the scan comes out of the webassembly runtime
+
+model: Excellent question. You're correctly identifying that the WebAssembly module must have its own internal, temporary "scratch space" to perform its calculations. These data structures are crucial for execution but are indeed completely destroyed and lost the moment the `main` function of the WebAssembly module returns control to the Rust scanner.
+
+Here are the primary data structures created and used exclusively within the WebAssembly runtime during a scan:
+
+### 1. The Operand Stack
+
+This is the most fundamental data structure in WebAssembly. It's a Last-In, First-Out (LIFO) stack where all calculations happen.
+
+*   **What it is:** A temporary area to hold values for immediate computation.
+*   **Why it's needed:** To perform any operation (like addition, comparison, etc.), WebAssembly code must first push the operands (the values) onto this stack. The operation then pops the values, performs the calculation, and pushes the result back onto the stack.
+*   **Example:** For the expression `1 + 2`:
+    1.  The WASM code executes `i64.const 1` (pushes the number 1 onto the stack).
+    2.  It executes `i64.const 2` (pushes the number 2).
+    3.  It executes `i64.add`. This instruction pops 1 and 2, adds them, and pushes the result, 3, back onto the stack.
+*   **When it's lost:** The contents of the stack are constantly changing during execution and are completely discarded when the function returns.
+
+### 2. Local Variables
+
+These are like the temporary variables you'd declare inside a function in any normal programming language.
+
+*   **What they are:** A small, fixed number of storage slots for each function call, used to hold values for longer than a single operation.
+*   **Why they're needed:** The operand stack is too transient. Local variables are essential for storing state within a function, especially for loops.
+*   **Example:** In a `for` loop like `for i in (1..10) : ( ... )`:
+    *   The `emit_for` function in `emit.rs` generates WASM code that uses local variables to store:
+        *   The loop counter (`i`).
+        *   The loop's upper bound (`10`).
+        *   The number of matches found so far (for quantifiers like `all of them` or `5 of them`).
+    *   On each iteration, the code will load the value of `i` from its local variable slot, increment it, and store it back. This state persists between loop iterations but is lost when the rule evaluation is finished.
+
+### 3. The Call Stack (Function Frames)
+
+This is a "stack of stacks" that manages the flow of execution between different functions.
+
+*   **What it is:** A stack where each item is a "frame". A new frame is pushed whenever a function is called and popped when that function returns. Each frame contains the local variables and the operand stack for that *specific* function call.
+*   **Why it's needed:** It allows functions to call other functions (including calls back to Rust) and then resume exactly where they left off.
+*   **Example:** A rule condition calls a function from a module, like `cuckoo.network.http_request(/evil.com/)`.
+    1.  The main rule evaluation is running in one frame on the call stack.
+    2.  When `http_request` is called, a new frame is pushed on top.
+    3.  The `http_request` function does its work using its own local variables and operand stack.
+    4.  When it returns a result, its entire frame is popped from the call stack and destroyed.
+    5.  Execution resumes in the original rule's frame, with the return value now on its operand stack.
+
+In summary, you can think of all these structures as the **temporary scratch paper** the WebAssembly module uses to do its math. The final answers (which rules and patterns matched) are explicitly and permanently written to the **shared memory bitmaps**. Everything else—the intermediate calculations, loop counters, and function call states—is ephemeral and vanishes when the scan is done.
+
+user: ok, is there a way to save the state of the webassembly and later when new input data is appended to the last state, can we just run scan the search for the pattern on the new data for the existing matches in the datastructure and the bitmap
+
+model: That is a very insightful question. You are asking about a form of **incremental or streaming scanning**, which is a highly advanced and complex feature.
+
+The short answer is: **No, this is not possible with the current design of YARA-X.** The WebAssembly state is intentionally ephemeral and cannot be saved and resumed in the way you describe.
+
+Here’s a detailed breakdown of why this is the case and the fundamental challenges involved:
+
+### 1. The Ephemeral Nature of WebAssembly State
+
+As we just discussed, the internal state of the WebAssembly module (operand stacks, local variables, call stack) is transient and tied to a single execution of the `main` function. While the `Wasmtime` runtime (which YARA-X uses) does have experimental features for snapshotting and resuming, they are not designed for this use case. The entire execution model of YARA-X is built around a "one-shot" scan:
+
+*   Start the WASM module.
+*   Execute the `main` function.
+*   Get the results from shared memory.
+*   Tear everything down.
+
+The state is not meant to be preserved.
+
+### 2. The Critical Problem: The Contiguous Data Stream
+
+This is the most significant hurdle. The Aho-Corasick algorithm (and other pattern matching logic) is fundamentally designed to operate on a **single, contiguous block of data**. It needs to see the data as a whole stream to function correctly.
+
+Your proposal is to scan the new data chunk and update the existing results. This would fail for a very common reason: **patterns that span the boundary between the old and new data.**
+
+**Consider this simple example:**
+
+*   Your YARA rule is looking for the string `"helloworld"`.
+*   The **old data** you scanned was: `"some data with hello"`
+*   The **new data** you append is: `"world and other stuff"`
+
+If you only scan the new data (`"world and other stuff"`), the Aho-Corasick algorithm will not find the pattern `"helloworld"`. It has no memory or context of the data that came before. The complete pattern only exists when the two chunks are viewed together: `"some data with helloworld and other stuff"`.
+
+### 3. The Problem of Match Offsets
+
+Even if you could somehow detect boundary-spanning patterns, another critical piece of information would be wrong: the **match offset**.
+
+*   Many YARA rules rely on the offset of a match (e.g., `@a[1] > 100`, `!a at 50`).
+*   If you scan the new data chunk in isolation, the offsets will be relative to the start of that *new chunk*, not the start of the combined data.
+*   A match for `!a` at offset `10` in the new chunk is completely different from a match at offset `10` in the full data stream. This would break the logic of most rules that use offsets.
+
+### How It Must Be Done
+
+To correctly scan data that has been appended, you have only one reliable option:
+
+1.  **Concatenate the data:** Create a new, single buffer in memory that contains the `old_data` followed by the `new_data`.
+2.  **Perform a full scan:** Run the YARA-X scanner on this new, combined buffer from the beginning.
+
+This is the only way to guarantee that all patterns (especially those crossing the old/new boundary) are found and that all match offsets are correct relative to the start of the data.
+
+In summary, while the idea of saving the WASM state and doing an incremental scan is appealing for performance, it violates the fundamental assumptions that the YARA pattern matching engine is built upon. The entire system is designed for a complete, top-to-bottom scan of a single, well-defined data buffer.
+
+user: ok, if we have to modify and my inputs are line records, each of the line could match a regex, my regex will not span across lines
+
+model: That's a fantastic and critical clarification. The constraint that **patterns will not span across lines** changes the answer from "impossible" to "feasible with significant modifications."
+
+You've identified the exact scenario where a form of incremental scanning can work. You can't save the raw WebAssembly execution state, but you *can* build a new host-side structure that preserves the *results* of each line's scan and accumulates them over time.
+
+Here is a detailed guide on how you would need to modify the YARA-X codebase to achieve this.
+
+### The Core Architectural Shift
+
+You would move from the current stateless `Scanner` to a new, stateful **`StreamingScanner`**.
+
+*   **Current `Scanner`:** Designed to be created, used for a single contiguous block of data, and then either destroyed or completely reset for the next block. It has no memory of past scans.
+*   **New `StreamingScanner`:** Would be created once and would maintain the matching state across multiple calls to a new `scan_line()` method. It would own the `ScanContext` and prevent it from being reset.
+
+---
+
+### Step-by-Step Implementation Guide
+
+Here are the key areas in the code you would need to change:
+
+#### 1. Create the `StreamingScanner` Struct
+
+You would create a new struct that looks very similar to the current `Scanner`, but it's designed to be long-lived.
+
+```rust
+// In lib/src/scanner/mod.rs (or a new file)
+
+pub struct StreamingScanner<'r> {
+    rules: &'r Rules,
+    // The wasm_store now holds the persistent state via its ScanContext
+    wasm_store: Pin<Box<Store<ScanContext<'static>>>>,
+    wasm_main_func: TypedFunc<(), i32>,
+    filesize: Global,
+    // Add a field to track the total offset
+    total_offset: u64,
+}
+```
+
+#### 2. Modify the `ScanContext` and Initialization
+
+The `ScanContext` would no longer be reset. The `StreamingScanner::new()` would initialize it once, and it would live for the lifetime of the scanner.
+
+#### 3. Create the `scan_line()` Method
+
+This new method would be the heart of your modification. Here’s the logic it would need to implement for each line it receives:
+
+**A. Do NOT Reset State:**
+The very first thing the current `scan_impl` does is call `self.reset()`. Your new `scan_line` method **must not** do this. This is how you preserve the `pattern_matches` list and the rule/pattern bitmaps between calls.
+
+**B. Update Scanned Data and Offsets:**
+The `ScanContext` needs to be pointed to the new line data for the Aho-Corasick search.
+
+```rust
+// Inside scan_line(line: &[u8])
+
+let ctx = self.scan_context_mut();
+
+// Point the context to the current line's data
+ctx.scanned_data = line.as_ptr();
+ctx.scanned_data_len = line.len();
+
+// Update the 'filesize' global that WASM sees to the length of the current line.
+self.filesize.set(
+    self.wasm_store.as_context_mut(),
+    Val::I64(line.len() as i64),
+).unwrap();
+```
+
+**C. Force a New Aho-Corasick Search:**
+You must trick the system into thinking a pattern search hasn't happened *for this line*.
+
+```rust
+// Get the 'pattern_search_done' global from the WASM instance
+let pattern_search_done = self.wasm_instance.get_global("pattern_search_done").unwrap();
+
+// Reset the lazy evaluation flag to 0 (false) before every line scan.
+pattern_search_done.set(self.wasm_store.as_context_mut(), Val::I32(0)).unwrap();
+```
+This is **critical**. It ensures that when you call the WASM `main` function, it will immediately call back to Rust's `search_for_patterns` to scan the new line.
+
+**D. Modify Match Reporting to Use Global Offsets:**
+Inside `search_for_patterns` (in `lib/src/scanner/context.rs`), when a match is found, its offset is relative to the start of the current line. You must adjust it to be relative to the total data stream.
+
+```rust
+// In search_for_patterns, when a match is found at `match_range`:
+
+// Before:
+// self.handle_sub_pattern_match(..., match_range, ...);
+
+// After:
+let global_match_range = (match_range.start + self.total_offset as usize)
+                         ..(match_range.end + self.total_offset as usize);
+
+self.handle_sub_pattern_match(..., global_match_range, ...);
+```
+The `handle_sub_pattern_match` would then add this globally-correct match to the persistent `pattern_matches` list.
+
+**E. Execute the Scan and Update State:**
+Now you call the WASM `main` function. It will:
+1.  See `pattern_search_done` is false.
+2.  Call Rust's `search_for_patterns`.
+3.  `search_for_patterns` runs Aho-Corasick on the *current line only*.
+4.  It finds matches, adjusts their offsets to be global, and **updates the shared pattern bitmap**. Because it's a bitmap, setting a bit to `1` is an OR operation; it won't erase matches from previous lines.
+5.  Control returns to WASM.
+6.  WASM evaluates **all rule conditions** based on the **cumulative state of the pattern bitmap**.
+7.  It then updates the **rule match bitmap** with the final results for this point in time.
+
+**F. Update Total Offset:**
+After the scan of the line is complete, update the total offset for the next call.
+
+```rust
+// At the end of scan_line()
+self.total_offset += line.len() as u64 + 1; // +1 for the newline character
+```
+
+### Summary of the New Workflow
+
+1.  Initialize `StreamingScanner` once. State is created.
+2.  For each `line` of input:
+    a. Call `scan_line(line)`.
+    b. The method points the scanner to the new line's data.
+    c. It resets the `pattern_search_done` flag to `0`.
+    d. It calls the WASM `main` function.
+    e. WASM calls back to Rust to run Aho-Corasick on the line.
+    f. Rust finds matches, makes their offsets global, and updates the persistent pattern bitmap and match list.
+    g. WASM re-evaluates all rules against the now-updated cumulative pattern state and updates the final rule bitmap.
+3.  After any line, you can query the `StreamingScanner` for the current set of matching rules.
+
+This approach gives you exactly what you want: you avoid re-scanning the text of previous lines, while correctly re-evaluating all rule logic against the accumulated set of pattern matches. It's a significant but very achievable modification.
+
+user: one doubt, when wasm searches using Aho-Corasick Search for a single atom, does it scans all the input data and finds all the patterns?
+
+model: That's a great question, and it gets to the very heart of why YARA uses the Aho-Corasick algorithm.
+
+The key thing to understand is that it **doesn't** search for a single atom. Its superpower is searching for **all atoms from all rules simultaneously in a single pass** over the data.
+
+Let's break down the process step-by-step:
+
+### Step 1: The Setup (Before the Scan)
+
+When you compile your YARA rules, the compiler (`lib/src/compiler/rules.rs`) does the following:
+
+1.  **Extracts Atoms:** It goes through every pattern in every rule (e.g., `$a = "abc"`, `$b = "xyz"`, `$c = "123"`) and extracts small, fixed-string parts called "atoms".
+2.  **Builds the Automaton:** It takes this collection of *all* atoms from *all* your rules and builds a single, large, highly-optimized state machine—the Aho-Corasick automaton.
+
+Think of it like creating one giant dictionary of every text fragment you ever need to look for.
+
+### Step 2: The Trigger (During the Scan)
+
+As we discussed, the search is lazy. The WebAssembly code starts evaluating a rule. The moment it hits a condition that needs pattern information for the first time (like `#a > 0`), it checks the `pattern_search_done` flag. Seeing it's `false`, it calls the `search_for_patterns` function back in the Rust host.
+
+### Step 3: The Search (The "One Pass")
+
+This is the crucial part. The `search_for_patterns` function in Rust does the following:
+
+1.  It takes the Aho-Corasick automaton (the giant dictionary) that was built during compilation.
+2.  It makes **one single pass** over the **entire input data** from beginning to end.
+3.  As it moves through the data, the automaton is constantly changing state. Whenever it reaches a state that represents a complete atom, it reports a match. For example, it might say:
+    *   "I found the atom for pattern `$a` at offset 100."
+    *   "I found the atom for pattern `$c` at offset 250."
+    *   "I found the atom for pattern `$a` again at offset 512."
+4.  For every match it finds, it updates the **shared pattern bitmap** and records the detailed match information (offset, length, etc.).
+
+### Step 4: The Aftermath
+
+Once the `search_for_patterns` function has reached the end of the input data, its job is done. It has found every occurrence of every atom. It sets the `pattern_search_done` flag to `true` and returns control to the WebAssembly module.
+
+From that point on, the WebAssembly code never needs to trigger a search again for that scan. It has a complete map of all pattern matches and can efficiently evaluate the rest of the rules.
+
+**In summary:**
+
+No, it does not search for a single atom. When the Aho-Corasick search is triggered, it is a **one-time, comprehensive event** that finds **all occurrences of all atoms** across the **entire input data** in a single, efficient pass.
+
+user: ok, which method searches for atom on the input and updates the matches and the bitmap
+
+model: You've pinpointed the exact spot. The entire process is orchestrated within `lib/src/scanner/context.rs`, but the two distinct responsibilities (searching vs. updating) are handled by different functions.
+
+### The Orchestrator: `search_for_patterns`
+
+This is the main function you're looking for, located in `lib/src/scanner/context.rs`. It drives the whole process.
+
+Inside this function, the key part that **searches for atoms** is this loop:
+
+```rust
+// In lib/src/scanner/context.rs, inside search_for_patterns()
+
+for ac_match in ac.find_overlapping_iter(scanned_data) {
+    // ...
+    // This loop iterates over every atom found by the Aho-Corasick algorithm.
+    // `ac_match` contains information about which atom was found and where.
+    // ...
+    // After an atom match is found, it's verified (e.g., for fullword, regex parts).
+    // If the verification is successful, it calls another function to handle the update.
+    // ...
+    self.handle_sub_pattern_match(
+        sub_pattern_id,
+        sub_pattern,
+        *pattern_id,
+        match_,
+    );
+}
+```
+
+### The Updater: `track_pattern_match`
+
+The `search_for_patterns` function and its helpers verify the match, but they delegate the final state update to a more specialized function. After a fully verified pattern match is confirmed, `handle_sub_pattern_match` is called, which immediately calls **`track_pattern_match`**.
+
+The `track_pattern_match` function in `lib/src/scanner/context.rs` is the one that performs the two specific updates you asked about:
+
+```rust
+// In lib/src/scanner/context.rs
+
+pub(crate) fn track_pattern_match(
+    &mut self,
+    pattern_id: PatternId,
+    match_: Match,
+    replace_if_longer: bool,
+) {
+    // ...
+    // 1. UPDATES THE BITMAP:
+    // It gets a mutable reference to the shared memory bitmap (`bits`)
+    // and sets the bit corresponding to the `pattern_id` to true.
+    bits.set(pattern_id.into(), true);
+
+    // 2. UPDATES THE MATCHES DATA STRUCTURE:
+    // It adds the detailed `Match` object (with offset and length)
+    // to the persistent `pattern_matches` list.
+    if !self.pattern_matches.add(pattern_id, match_, replace_if_longer) {
+        self.limit_reached.insert(pattern_id);
+    }
+}
+```
+
+**In summary:**
+
+*   **Searching Method:** `search_for_patterns` (specifically the `ac.find_overlapping_iter(...)` loop within it).
+*   **Updating Method:** `track_pattern_match` (which is called by the search method after a match is confirmed).
+
+user: ok, who creates scancontext
+
+model: Excellent question. It gets right to the start of the scanner's lifecycle.
+
+The `ScanContext` is created by the **`Scanner::new()`** function.
+
+This function is located in the file **`lib/src/scanner/mod.rs`**.
+
+Here is the step-by-step process:
+
+1.  A user of the YARA-X library wants to scan some data. The first thing they do is create a `Scanner` object by calling `Scanner::new(rules)`.
+
+2.  This `Scanner::new()` function acts as the constructor. One of its first and most important jobs is to instantiate a fresh `ScanContext` struct. You can see it right inside the function:
+
+    ```rust
+    // In lib/src/scanner/mod.rs, inside Scanner::new()
+
+    let ctx = ScanContext {
+        wasm_store: NonNull::dangling(),
+        runtime_objects: IndexMap::new(),
+        compiled_rules: rules,
+        // ... all other fields are initialized to their empty/default state
+        pattern_matches: PatternMatches::new(),
+        matching_rules: IndexMap::new(),
+        // ... etc.
+    };
+    ```
+
+3.  Immediately after creating this `ctx` variable, the `Scanner::new()` function moves it into the `wasmtime::Store`. The `Store` is the WebAssembly runtime's container for all host-side state.
+
+So, every time you create a new `Scanner`, you are also creating a new, clean `ScanContext` that will hold the state for all subsequent scans performed with that scanner instance.
+
+user: one doubt, so if i want to implement a streaming engine, i just need to persist scanner object and on scan context need to set new data thet was received and call search_for_patterns before passing the objects to wasm and set search flag
+
+model: You are incredibly close! Your understanding is about 90% correct, and you've grasped the most important concepts.
+
+Let's refine one crucial detail: the **control flow**. You don't call `search_for_patterns` directly. Instead, you trigger the WebAssembly module, which then calls `search_for_patterns` back on its own.
+
+This is the "lazy evaluation" we've been discussing. It's a subtle but critical distinction.
+
+Here is the corrected and precise workflow for your streaming engine's `scan_line` method:
+
+---
+
+### Corrected Streaming Workflow (The `scan_line` method)
+
+You are correct that you need to persist the `StreamingScanner` object. Inside that object, for each new line of data you receive, you would do the following:
+
+1.  **Set New Data on ScanContext:** Exactly as you said. You update `scanned_data` and `scanned_data_len` to point to the new line. You also need to update the `filesize` global variable that WASM sees.
+
+2.  **Reset the Search Flag:** This is the key. Before calling into WASM, you reach into its global variables and manually reset the `pattern_search_done` flag back to `0` (false). This tells the WASM module, "You are no longer up-to-date; you must perform a new search if you need pattern info."
+
+3.  **Call the WASM `main` function:** This is the part that differs from your proposal. You don't call `search_for_patterns`. You call the main entry point of the WebAssembly module (`wasm_main_func.call(...)`).
+
+4.  **WASM Calls Back to Rust:** The WASM code starts executing. When it hits the first rule that needs pattern data, it will:
+    *   Check the `pattern_search_done` flag.
+    *   See that it is `0` (false).
+    *   **It then calls the `search_for_patterns` function back in your Rust host.**
+
+5.  **Rust Searches and Updates:** Your `search_for_patterns` function now runs. As we discussed, you will have modified it to:
+    *   Run Aho-Corasick on the *current line only*.
+    *   **Adjust the match offsets** to be global (e.g., `line_offset + total_stream_offset`).
+    *   Update the persistent `pattern_matches` list and the shared `pattern_bitmap`.
+
+6.  **WASM Completes the Scan:** Control returns to the WASM module. It now has an up-to-date pattern bitmap (reflecting all matches from all lines so far). It proceeds to evaluate all the rule conditions and updates the final `rule_match_bitmap`.
+
+### Why this control flow is important:
+
+The WebAssembly module is designed to be the "brain" that decides *if* and *when* a search is necessary. By resetting the flag and re-running the `main` function, you are correctly using its built-in lazy evaluation logic. You're telling it, "Your knowledge is stale, re-evaluate everything," and it correctly responds by triggering the search as its first step.
+
+**In summary, your plan was almost perfect. The only change is:**
+
+*   **Don't** call `search_for_patterns` yourself.
+*   **Do** reset the `pattern_search_done` flag to `0` and then call the main WASM entry point (`wasm_main_func.call`). The WASM module will then call `search_for_patterns` for you at the correct time.
+
+You've correctly identified all the necessary ingredients to build a streaming scanner

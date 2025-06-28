@@ -45,9 +45,15 @@ pub(crate) use crate::scanner::matches::Match;
 
 mod context;
 mod matches;
+mod streaming;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod streaming_tests;
+
+pub use streaming::StreamingScanner;
 
 /// Error returned when a scan operation fails.
 #[derive(Error, Debug)]
@@ -201,6 +207,7 @@ impl<'r> Scanner<'r> {
             deadline: 0,
             limit_reached: FxHashSet::default(),
             regexp_cache: RefCell::new(FxHashMap::default()),
+            global_scan_offset: 0,
             #[cfg(feature = "rules-profiling")]
             time_spent_in_pattern: FxHashMap::default(),
             #[cfg(feature = "rules-profiling")]

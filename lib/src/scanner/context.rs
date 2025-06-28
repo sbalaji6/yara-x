@@ -111,6 +111,10 @@ pub(crate) struct ScanContext<'r> {
     pub regexp_cache: RefCell<FxHashMap<RegexpId, Regex>>,
     /// Callback invoked every time a YARA rule calls `console.log`.
     pub console_log: Option<Box<dyn FnMut(String) + 'r>>,
+    /// Global offset in the stream for streaming scanner.
+    /// This is used to adjust match offsets to be relative to the entire stream
+    /// rather than just the current chunk being scanned.
+    pub global_scan_offset: u64,
     /// Hash map that tracks the time spend on each pattern. Keys are pattern
     /// PatternIds and values are the cumulative time spent on verifying each
     /// pattern.
@@ -738,8 +742,13 @@ impl ScanContext<'_> {
         sub_pattern_id: SubPatternId,
         sub_pattern: &SubPattern,
         pattern_id: PatternId,
-        match_: Match,
+        mut match_: Match,
     ) {
+        // Adjust match offset for streaming scanner
+        if self.global_scan_offset > 0 {
+            match_.range.start += self.global_scan_offset as usize;
+            match_.range.end += self.global_scan_offset as usize;
+        }
         match sub_pattern {
             SubPattern::Literal { .. }
             | SubPattern::Xor { .. }
