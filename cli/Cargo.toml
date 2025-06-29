@@ -22,6 +22,16 @@ path = "src/main.rs"
 # cargo test -p yara-x-cli --bin yr
 test = false
 
+[[bin]]
+name = "stream-perf"
+path = "src/stream_perf.rs"
+test = false
+
+[[bin]]
+name = "stream-perf-chunk"
+path = "src/stream_perf_chunk.rs"
+test = false
+
 [features]
 # Enable the "debug" command for developers.
 debug-cmd = []
