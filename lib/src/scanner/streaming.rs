@@ -24,19 +24,21 @@ use crate::wasm::{self, MATCHING_RULES_BITMAP_BASE};
 
 static INIT_HEARTBEAT: Once = Once::new();
 
-/// A streaming scanner that can process data line by line while maintaining
+/// A streaming scanner that can process data incrementally while maintaining
 /// state across multiple scans.
 ///
 /// Unlike the regular [`Scanner`], which resets its state between scans,
 /// `StreamingScanner` preserves pattern matches and rule evaluations across
-/// multiple calls to [`scan_line`](StreamingScanner::scan_line).
+/// multiple calls to [`scan_line`](StreamingScanner::scan_line) or 
+/// [`scan_chunk`](StreamingScanner::scan_chunk).
 ///
 /// # Important Notes
 ///
-/// - Patterns must not span across line boundaries
-/// - Each line is processed independently for pattern matching
+/// - When using `scan_line`: Patterns must not span across line boundaries
+/// - When using `scan_chunk`: Patterns can span across lines within the chunk
+/// - Each scan is processed independently for pattern matching
 /// - Match offsets are adjusted to be global (relative to the entire stream)
-/// - Rule conditions are re-evaluated after each line with cumulative results
+/// - Rule conditions are re-evaluated after each scan with cumulative results
 ///
 /// # Example
 ///
@@ -53,15 +55,20 @@ static INIT_HEARTBEAT: Once = Once::new();
 /// # "#).unwrap();
 /// let mut scanner = yara_x::StreamingScanner::new(&rules);
 /// 
-/// // First line contains "pattern1"
-/// scanner.scan_line(b"first line with pattern1\n").unwrap();
+/// // Using line-by-line scanning
+/// scanner.scan_line(b"first line with pattern1").unwrap();
 /// let results = scanner.get_matches();
 /// assert_eq!(results.matching_rules().count(), 0); // Rule doesn't match yet
 /// 
-/// // Second line contains "pattern2"
-/// scanner.scan_line(b"second line with pattern2\n").unwrap();
+/// scanner.scan_line(b"second line with pattern2").unwrap();
 /// let results = scanner.get_matches();
 /// assert_eq!(results.matching_rules().count(), 1); // Now the rule matches
+/// 
+/// // Or using chunk scanning (can process multiple lines at once)
+/// scanner.reset();
+/// scanner.scan_chunk(b"first line with pattern1\nsecond line with pattern2\n").unwrap();
+/// let results = scanner.get_matches();
+/// assert_eq!(results.matching_rules().count(), 1); // Rule matches in single scan
 /// ```
 pub struct StreamingScanner<'r> {
     rules: &'r Rules,
@@ -235,6 +242,25 @@ impl<'r> StreamingScanner<'r> {
         self
     }
 
+    /// Scans a chunk of data that may contain multiple lines.
+    ///
+    /// This method processes the provided chunk and updates the cumulative
+    /// pattern matches. Rule conditions are re-evaluated with the updated
+    /// pattern information. The chunk can contain any number of lines,
+    /// including partial lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `chunk` - The chunk of data to scan (may contain multiple lines)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the scan was successful, or an error if the scan
+    /// timed out or encountered another issue.
+    pub fn scan_chunk(&mut self, chunk: &[u8]) -> Result<(), ScanError> {
+        self._scan_data(chunk, true)
+    }
+
     /// Scans a single line of data.
     ///
     /// This method processes the provided line and updates the cumulative
@@ -250,6 +276,16 @@ impl<'r> StreamingScanner<'r> {
     /// Returns `Ok(())` if the scan was successful, or an error if the scan
     /// timed out or encountered another issue.
     pub fn scan_line(&mut self, line: &[u8]) -> Result<(), ScanError> {
+        self._scan_data(line, false)
+    }
+
+    /// Internal method that handles both line and chunk scanning.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The data to scan (either a line or a chunk)
+    /// * `count_lines` - Whether to count lines within the data
+    fn _scan_data(&mut self, data: &[u8], count_lines: bool) -> Result<(), ScanError> {
         // Set deadline for timeout (following the same logic as regular scanner)
         let timeout_secs = if let Some(timeout) = self.timeout {
             std::cmp::min(
@@ -289,9 +325,9 @@ impl<'r> StreamingScanner<'r> {
         {
             let ctx = self.wasm_store.data_mut();
             
-            // Update the context to point to the current line
-            ctx.scanned_data = line.as_ptr();
-            ctx.scanned_data_len = line.len();
+    // Update the context to point to the current data
+            ctx.scanned_data = data.as_ptr();
+            ctx.scanned_data_len = data.len();
             
             // Store the global offset in the context so search_for_patterns can use it
             ctx.global_scan_offset = self.total_bytes_processed;
@@ -350,9 +386,9 @@ impl<'r> StreamingScanner<'r> {
             .set(self.wasm_store.as_context_mut(), Val::I32(0))
             .expect("can't set pattern_search_done");
 
-        // Set filesize to current line length
+        // Set filesize to current data length
         self.filesize
-            .set(self.wasm_store.as_context_mut(), Val::I64(line.len() as i64))
+            .set(self.wasm_store.as_context_mut(), Val::I64(data.len() as i64))
             .expect("can't set filesize");
 
         // Call the WASM main function
@@ -393,8 +429,21 @@ impl<'r> StreamingScanner<'r> {
         }
 
         // Update counters
-        self.total_bytes_processed += line.len() as u64;
-        self.line_count += 1;
+        self.total_bytes_processed += data.len() as u64;
+        
+        // Count lines if requested (for chunk scanning)
+        if count_lines {
+            // Count newlines, but if data is non-empty and doesn't end with newline,
+            // that's an additional line
+            let mut line_count = data.iter().filter(|&&b| b == b'\n').count() as u64;
+            if !data.is_empty() && !data.ends_with(b"\n") {
+                line_count += 1;
+            }
+            self.line_count += line_count;
+        } else {
+            // For single line scanning, increment by 1
+            self.line_count += 1;
+        }
 
         Ok(())
     }

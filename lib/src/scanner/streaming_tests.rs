@@ -368,4 +368,136 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_streaming_scanner_chunk_multiline() {
+        let mut compiler = Compiler::new();
+        compiler
+            .add_source(r#"
+                rule test_multiline {
+                    strings:
+                        $a = "start"
+                        $b = "middle"
+                        $c = "end"
+                    condition:
+                        $a and $b and $c
+                }
+            "#)
+            .unwrap();
+        let rules = compiler.build();
+
+        let mut scanner = StreamingScanner::new(&rules);
+
+        // Test 1: Single chunk containing all patterns across lines
+        let chunk = b"line1 with start pattern\nline2 has middle in it\nline3 contains end\n";
+        scanner.scan_chunk(chunk).unwrap();
+        
+        let results = scanner.get_matches();
+        assert_eq!(results.matching_rules().count(), 1, "Rule should match when all patterns found in chunk");
+
+        // Test 2: Reset and test with separate chunks
+        scanner.reset();
+        
+        // First chunk has start and middle
+        scanner.scan_chunk(b"start of data\nmiddle section\n").unwrap();
+        let results = scanner.get_matches();
+        assert_eq!(results.matching_rules().count(), 0, "Rule shouldn't match yet");
+        
+        // Second chunk has end
+        scanner.scan_chunk(b"final part with end\n").unwrap();
+        let results = scanner.get_matches();
+        assert_eq!(results.matching_rules().count(), 1, "Rule should match after all patterns found");
+    }
+
+    #[test]
+    fn test_streaming_scanner_chunk_pattern_across_lines() {
+        let mut compiler = Compiler::new();
+        compiler
+            .add_source(r#"
+                rule test_pattern_span {
+                    strings:
+                        $a = "hello\nworld"  // Pattern spans across newline
+                        $b = "single"
+                    condition:
+                        $a and $b
+                }
+            "#)
+            .unwrap();
+        let rules = compiler.build();
+
+        let mut scanner = StreamingScanner::new(&rules);
+
+        // Using scan_chunk allows patterns to span lines within the chunk
+        let chunk = b"This is hello\nworld and single pattern\n";
+        scanner.scan_chunk(chunk).unwrap();
+        
+        let results = scanner.get_matches();
+        assert_eq!(results.matching_rules().count(), 1, "Rule should match with pattern spanning lines");
+
+        // Compare with line-by-line scanning
+        scanner.reset();
+        scanner.scan_line(b"This is hello").unwrap();
+        scanner.scan_line(b"world and single pattern").unwrap();
+        
+        let results = scanner.get_matches();
+        // With line-by-line scanning, the pattern spanning lines won't match
+        assert_eq!(results.matching_rules().count(), 0, "Rule shouldn't match with line-by-line when pattern spans lines");
+    }
+
+    #[test]
+    fn test_streaming_scanner_chunk_line_counting() {
+        let mut compiler = Compiler::new();
+        compiler
+            .add_source(r#"
+                rule dummy {
+                    condition:
+                        true
+                }
+            "#)
+            .unwrap();
+        let rules = compiler.build();
+
+        let mut scanner = StreamingScanner::new(&rules);
+
+        // Test line counting with chunks
+        scanner.scan_chunk(b"line1\nline2\nline3\n").unwrap();
+        assert_eq!(scanner.lines_processed(), 3, "Should count 3 lines");
+        
+        scanner.scan_chunk(b"line4\nline5").unwrap(); // No trailing newline
+        assert_eq!(scanner.lines_processed(), 5, "Should count 5 lines total");
+        
+        scanner.scan_chunk(b"\nline6\n\n").unwrap(); // Empty lines
+        assert_eq!(scanner.lines_processed(), 8, "Should count empty lines too");
+
+        // Test single line method still increments by 1
+        scanner.scan_line(b"single line").unwrap();
+        assert_eq!(scanner.lines_processed(), 9, "scan_line should increment by 1");
+    }
+
+    #[test]
+    fn test_streaming_scanner_chunk_offsets() {
+        let mut compiler = Compiler::new();
+        compiler
+            .add_source(r#"
+                rule test_offsets {
+                    strings:
+                        $a = "marker"
+                    condition:
+                        $a and @a[1] == 20
+                }
+            "#)
+            .unwrap();
+        let rules = compiler.build();
+
+        let mut scanner = StreamingScanner::new(&rules);
+
+        // First chunk: 20 bytes, no marker
+        scanner.scan_chunk(b"12345678901234567890").unwrap();
+        
+        // Second chunk: marker at position 0 (global position 20)
+        scanner.scan_chunk(b"marker here").unwrap();
+        
+        let results = scanner.get_matches();
+        assert_eq!(results.matching_rules().count(), 1, "Rule should match with marker at global offset 20");
+    }
 }
