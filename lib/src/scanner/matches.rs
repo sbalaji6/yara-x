@@ -21,7 +21,7 @@ pub(crate) struct Match {
 ///
 /// The matches are kept sorted by starting offset in ascending order. Two
 /// different matches can't have the same starting offset.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct MatchList {
     matches: Vec<Match>,
 }
@@ -170,6 +170,7 @@ impl<'a> IntoIterator for &'a MatchList {
     }
 }
 
+#[derive(Clone)]
 pub struct UnconfirmedMatch {
     pub range: Range<usize>,
     pub chain_length: usize,
@@ -278,6 +279,16 @@ impl PatternMatches {
                 entry.insert(matches);
                 true
             }
+        }
+    }
+}
+
+impl Clone for PatternMatches {
+    fn clone(&self) -> Self {
+        Self {
+            matches: self.matches.clone(),
+            max_matches_per_pattern: self.max_matches_per_pattern,
+            capacity: self.capacity,
         }
     }
 }

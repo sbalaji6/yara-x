@@ -46,6 +46,7 @@ pub(crate) use crate::scanner::matches::Match;
 mod context;
 mod matches;
 mod streaming;
+mod multi_stream;
 
 #[cfg(test)]
 mod tests;
@@ -53,7 +54,11 @@ mod tests;
 #[cfg(test)]
 mod streaming_tests;
 
+#[cfg(test)]
+mod multi_stream_tests;
+
 pub use streaming::StreamingScanner;
+pub use multi_stream::MultiStreamScanner;
 
 /// Error returned when a scan operation fails.
 #[derive(Error, Debug)]

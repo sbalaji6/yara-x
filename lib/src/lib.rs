@@ -69,6 +69,7 @@ pub use scanner::ScanOptions;
 pub use scanner::ScanResults;
 pub use scanner::Scanner;
 pub use scanner::StreamingScanner;
+pub use scanner::MultiStreamScanner;
 pub use variables::Variable;
 
 mod compiler;

@@ -128,7 +128,6 @@ hash-module = [
 
 # The `lnk` module parses LNK files.
 lnk-module = [
-    "dep:uuid",
     "dep:nom",
 ]
 
@@ -265,7 +264,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 strum_macros = { workspace = true }
 thiserror = { workspace = true }
 tlsh-fixed = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true, features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }
 walrus = { workspace = true }
 wasmtime = { workspace = true, default-features = false, features = [
     "cranelift",
