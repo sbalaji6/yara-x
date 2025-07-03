@@ -37,10 +37,21 @@ struct Args {
         required = true
     )]
     chunk_size: usize,
+
+    #[arg(
+        long = "relaxed-re-syntax",
+        help = "Use a more relaxed syntax check while parsing regular expressions",
+        default_value = "false"
+    )]
+    relaxed_re_syntax: bool,
 }
 
-fn load_rules(yara_files: &[PathBuf]) -> Result<Rules> {
+fn load_rules(yara_files: &[PathBuf], relaxed_re_syntax: bool) -> Result<Rules> {
     let mut compiler = Compiler::new();
+    
+    if relaxed_re_syntax {
+        compiler.relaxed_re_syntax(true);
+    }
     
     for yara_file in yara_files {
         println!("Loading YARA rules from: {}", yara_file.display());
@@ -196,7 +207,7 @@ fn test2_streaming_chunk(rules: &Rules, lines: &[String], chunk_size: usize) -> 
 fn main() -> Result<()> {
     let args = Args::parse();
     
-    let rules = load_rules(&args.yara_files)?;
+    let rules = load_rules(&args.yara_files, args.relaxed_re_syntax)?;
     println!("Successfully loaded {} YARA file(s)", args.yara_files.len());
     
     let lines = read_file_lines(&args.input_file)?;
