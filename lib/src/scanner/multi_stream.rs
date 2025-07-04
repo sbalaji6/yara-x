@@ -690,6 +690,66 @@ impl<'r> MultiStreamScanner<'r> {
             self.contexts.get(stream_id).map(|ctx| ctx.line_count)
         }
     }
+
+    /// Estimates the memory usage of all cached stream contexts in bytes.
+    pub fn contexts_memory_usage(&self) -> usize {
+        let mut total = 0;
+        
+        // Base HashMap overhead (approximately)
+        total += std::mem::size_of::<HashMap<Uuid, StreamContext>>();
+        
+        for (uuid, context) in &self.contexts {
+            // UUID size
+            total += std::mem::size_of::<Uuid>();
+            
+            // StreamContext struct itself
+            total += std::mem::size_of::<StreamContext>();
+            
+            // Dynamic allocations within StreamContext:
+            
+            // Vectors of RuleIds
+            total += context.non_private_matching_rules.capacity() * std::mem::size_of::<RuleId>();
+            total += context.private_matching_rules.capacity() * std::mem::size_of::<RuleId>();
+            
+            // Bitmaps
+            total += context.rule_bitmap.capacity();
+            total += context.pattern_bitmap.capacity();
+            
+            // IndexMap for matching_rules (approximate)
+            total += context.matching_rules.capacity() * 
+                (std::mem::size_of::<NamespaceId>() + std::mem::size_of::<Vec<RuleId>>());
+            for (_, rules) in &context.matching_rules {
+                total += rules.capacity() * std::mem::size_of::<RuleId>();
+            }
+            
+            // FxHashSet for limit_reached
+            total += context.limit_reached.capacity() * std::mem::size_of::<PatternId>();
+            
+            // Note: pattern_matches, unconfirmed_matches, and module_outputs 
+            // would need their own size calculation methods to be accurate
+        }
+        
+        total
+    }
+
+    /// Returns detailed memory statistics for debugging.
+    pub fn memory_stats(&self) -> String {
+        let mut stats = String::new();
+        stats.push_str(&format!("Total streams cached: {}\n", self.contexts.len()));
+        stats.push_str(&format!("Total contexts memory (estimate): {} bytes\n", self.contexts_memory_usage()));
+        
+        for (i, (uuid, context)) in self.contexts.iter().enumerate() {
+            stats.push_str(&format!("\nStream {}: {}\n", i, uuid));
+            stats.push_str(&format!("  - Bytes processed: {}\n", context.total_bytes_processed));
+            stats.push_str(&format!("  - Lines processed: {}\n", context.line_count));
+            stats.push_str(&format!("  - Non-private rules matched: {}\n", context.non_private_matching_rules.len()));
+            stats.push_str(&format!("  - Private rules matched: {}\n", context.private_matching_rules.len()));
+            stats.push_str(&format!("  - Rule bitmap size: {} bytes\n", context.rule_bitmap.len()));
+            stats.push_str(&format!("  - Pattern bitmap size: {} bytes\n", context.pattern_bitmap.len()));
+        }
+        
+        stats
+    }
 }
 
 /// Results from a multi-stream scan for a specific stream.

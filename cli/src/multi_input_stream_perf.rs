@@ -91,6 +91,11 @@ fn main() -> Result<()> {
                     }
                 }
                 
+                // Print memory usage after each chunk
+                println!("        Cache memory usage: {} KB ({} active streams)", 
+                    scanner.contexts_memory_usage() / 1024, 
+                    scanner.active_streams().len());
+                
                 processed += 1;
             } else {
                 active -= 1;
@@ -111,6 +116,10 @@ fn main() -> Result<()> {
         let total_matches = results.matching_rules().count();
         println!("  File {}: {} total rules matched", i, total_matches);
     }
+    
+    // Print detailed memory statistics
+    println!("\nFinal memory statistics:");
+    println!("{}", scanner.memory_stats());
     
     Ok(())
 }

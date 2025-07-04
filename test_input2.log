@@ -1,0 +1,10 @@
+2024-01-02 09:00:00 INFO Server started
+2024-01-02 09:00:01 DEBUG Loading configuration
+2024-01-02 09:00:02 INFO Configuration loaded
+2024-01-02 09:00:03 WARNING Old config detected
+2024-01-02 09:00:04 INFO Starting services
+2024-01-02 09:00:05 ERROR Service initialization failed
+2024-01-02 09:00:06 INFO Fallback mode activated
+2024-01-02 09:00:07 DEBUG Checking user_id permissions
+2024-01-02 09:00:08 INFO Session established for user
+2024-01-02 09:00:09 ERROR Critical error in session handler

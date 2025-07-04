@@ -1,0 +1,10 @@
+2024-01-01 10:00:00 INFO Starting application
+2024-01-01 10:00:01 ERROR Failed to connect to database
+2024-01-01 10:00:02 WARNING Connection timeout
+2024-01-01 10:00:03 INFO Retrying connection
+2024-01-01 10:00:04 ERROR Authentication failed for user_id=12345
+2024-01-01 10:00:05 INFO Created new session=abc123
+2024-01-01 10:00:06 DEBUG Processing request
+2024-01-01 10:00:07 ERROR Invalid user_id in session
+2024-01-01 10:00:08 WARNING Memory usage high
+2024-01-01 10:00:09 INFO Request completed
