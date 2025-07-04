@@ -1,0 +1,6 @@
+File2: Second input file
+File2: Also has test patterns
+File2: Different content here
+File2: More test data
+File2: Pattern matching content
+File2: Additional test lines

@@ -32,6 +32,21 @@ name = "stream-perf-chunk"
 path = "src/stream_perf_chunk.rs"
 test = false
 
+[[bin]]
+name = "multi-stream-perf"
+path = "src/multi_stream_perf.rs"
+test = false
+
+[[bin]]
+name = "multi-input-stream-perf"
+path = "src/multi_input_stream_perf.rs"
+test = false
+
+[[bin]]
+name = "test-chunk-boundary"
+path = "src/test_chunk_boundary.rs"
+test = false
+
 [features]
 # Enable the "debug" command for developers.
 debug-cmd = []
@@ -82,6 +97,7 @@ encoding_rs = "0.8.35"
 superconsole = "0.2.0"
 unicode-width = "0.2.0"
 wild = "2.2.1"
+uuid = { version = "1.10", features = ["v4"] }
 
 [dev-dependencies]
 assert_cmd = "2.0.16"

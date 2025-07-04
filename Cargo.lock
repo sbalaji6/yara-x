@@ -4797,6 +4797,7 @@ dependencies = [
  "strum_macros",
  "superconsole",
  "unicode-width",
+ "uuid",
  "wild",
  "yansi",
  "yara-x",
