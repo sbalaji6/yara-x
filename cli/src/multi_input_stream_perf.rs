@@ -18,6 +18,9 @@ struct Args {
 
     #[arg(short = 'c', long = "chunk-size", required = true)]
     chunk_size: usize,
+
+    #[arg(long, help = "Use a more relaxed syntax check while parsing regular expressions")]
+    relaxed_re_syntax: bool,
 }
 
 fn main() -> Result<()> {
@@ -25,6 +28,7 @@ fn main() -> Result<()> {
     
     // Load rules
     let mut compiler = Compiler::new();
+    compiler.relaxed_re_syntax(args.relaxed_re_syntax);
     for yara_file in &args.yara_files {
         let source = std::fs::read_to_string(yara_file)?;
         compiler.add_source(source.as_str())?;
