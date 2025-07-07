@@ -10,7 +10,7 @@ use yara_x::{Compiler, MultiStreamScanner};
 #[derive(Parser, Debug)]
 #[command(name = "multi-input-stream-perf")]
 struct Args {
-    #[arg(short = 'r', long = "rules", required = true)]
+    #[arg(short = 'r', long = "rules", required = true, num_args = 1..)]
     yara_files: Vec<PathBuf>,
 
     #[arg(short = 'i', long = "input", required = true, num_args = 1..)]
@@ -27,6 +27,12 @@ fn main() -> Result<()> {
     let args = Args::parse();
     
     // Load rules
+    println!("Loading {} YARA file(s):", args.yara_files.len());
+    for yara_file in &args.yara_files {
+        println!("  - {}", yara_file.display());
+    }
+    println!();
+    
     let mut compiler = Compiler::new();
     compiler.relaxed_re_syntax(args.relaxed_re_syntax);
     for yara_file in &args.yara_files {
@@ -34,6 +40,9 @@ fn main() -> Result<()> {
         compiler.add_source(source.as_str())?;
     }
     let rules = compiler.build();
+    
+    println!("Compiled {} YARA rules", rules.iter().len());
+    println!();
     
     // Create scanner
     let mut scanner = MultiStreamScanner::new(&rules);
