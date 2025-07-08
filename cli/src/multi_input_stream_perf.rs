@@ -14,7 +14,7 @@ struct Args {
     yara_files: Vec<PathBuf>,
 
     #[arg(short = 'i', long = "input", required = true, num_args = 1..)]
-    input_files: Vec<PathBuf>,
+    input_files: Vec<String>,
 
     #[arg(short = 'c', long = "chunk-size", required = true)]
     chunk_size: usize,
@@ -47,24 +47,45 @@ fn main() -> Result<()> {
     // Create scanner
     let mut scanner = MultiStreamScanner::new(&rules);
     
-    // Open files
+    // Parse input files and UUIDs
     let mut readers = Vec::new();
     let mut uuids = Vec::new();
+    let mut file_paths = Vec::new();
     let mut active_files = Vec::new();  // Track which files are still active
-    for (i, path) in args.input_files.iter().enumerate() {
-        let file = File::open(path)?;
+    
+    for (i, input) in args.input_files.iter().enumerate() {
+        let (path, uuid) = if let Some(colon_pos) = input.rfind(':') {
+            // Check if what follows the colon looks like a UUID
+            let potential_uuid = &input[colon_pos + 1..];
+            if let Ok(parsed_uuid) = Uuid::parse_str(potential_uuid) {
+                // Valid UUID found
+                let path = PathBuf::from(&input[..colon_pos]);
+                (path, parsed_uuid)
+            } else {
+                // Not a valid UUID, treat the whole thing as a path
+                (PathBuf::from(input), Uuid::new_v4())
+            }
+        } else {
+            // No colon found, treat as path and generate UUID
+            (PathBuf::from(input), Uuid::new_v4())
+        };
+        
+        println!("Processing file: {} with UUID: {}", path.display(), uuid);
+        
+        let file = File::open(&path)?;
         readers.push(BufReader::new(file));
-        uuids.push(Uuid::new_v4());
-        active_files.push(i);  // Initially all files are active
+        uuids.push(uuid);
+        file_paths.push(path);
+        active_files.push(i);
     }
     
-    println!("Processing {} files with chunk size {}", args.input_files.len(), args.chunk_size);
+    println!("\nProcessing {} files with chunk size {}", file_paths.len(), args.chunk_size);
     
     let start = Instant::now();
     let mut round = 1;
     
     // Track previous match counts for each stream
-    let mut prev_matches: Vec<usize> = vec![0; args.input_files.len()];
+    let mut prev_matches: Vec<usize> = vec![0; file_paths.len()];
     
     // Process in round-robin
     while !active_files.is_empty() {
@@ -96,7 +117,7 @@ fn main() -> Result<()> {
                 prev_matches[file_idx] = current_matches;
                 
                 println!("Round {} - File {} ({}): {} bytes in {:?}, {} new matches (total: {})", 
-                    round, file_idx, args.input_files[file_idx].display(), 
+                    round, file_idx, file_paths[file_idx].display(), 
                     chunk.len(), chunk_elapsed, new_matches, current_matches);
                 
                 // Show all currently matching rules
@@ -116,7 +137,7 @@ fn main() -> Result<()> {
             } else {
                 // Mark this file index for removal
                 exhausted_indices.push(idx);
-                println!("Round {} - File {} ({}) exhausted", round, file_idx, args.input_files[file_idx].display());
+                println!("Round {} - File {} ({}) exhausted", round, file_idx, file_paths[file_idx].display());
             }
         }
         
@@ -137,7 +158,7 @@ fn main() -> Result<()> {
     for i in 0..uuids.len() {
         let results = scanner.get_matches(&uuids[i]).unwrap();
         let total_matches = results.matching_rules().count();
-        println!("  File {}: {} total rules matched", i, total_matches);
+        println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], total_matches);
     }
     
     // Print detailed memory statistics
