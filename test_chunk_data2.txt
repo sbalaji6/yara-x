@@ -1,7 +1,0 @@
-Second file with START_MARKER
-Different content here  
-HELLO_WORLD_PATTERN in one line
-Some filler text
-DATA_456_VALUE for regex match
-More content to process
-Finally END_MARKER completes

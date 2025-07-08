@@ -1,9 +1,0 @@
-This is a normal line
-Another normal line
-This line contains malicious content
-Yet another normal line
-This line has suspicious activity
-Normal line again
-This line contains the word pattern
-Both malicious and pattern are here
-Final normal line

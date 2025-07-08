@@ -1,5 +1,0 @@
-File1: This is the first test file
-File1: It contains test patterns
-File1: Multiple lines with test content
-File1: Another test pattern here
-File1: Some more content to scan

@@ -1,8 +1,0 @@
-This file contains START_MARKER at the beginning
-Some random data here
-END_MARKER at the end
-More data to fill the chunk
-HELLO_WORLD_PATTERN in this file
-DATA_123_VALUE matches regex
-Additional content here
-END_MARKER at the end
