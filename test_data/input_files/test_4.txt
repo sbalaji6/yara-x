@@ -1,0 +1,50 @@
+This is test file number 4
+Contains some suspicious patterns
+malware_signature_123
+evil_function_call()
+suspicious_behavior_detected
+Line 6 with more content
+Line 7 with even more content
+Line 8 with additional data
+Line 9 with extra information
+Line 10 final line
+Additional line 11 in file 4 with random content: ad1b4fb197ab8d310215
+Additional line 12 in file 4 with random content: f6eb443d587e38a9db9e
+Additional line 13 in file 4 with random content: 9a911e253aa20deb4d25
+Additional line 14 in file 4 with random content: 0b43c4d0414b00ec1002
+Additional line 15 in file 4 with random content: 7702b08592ab78bcc447
+Additional line 16 in file 4 with random content: 74915b4108c7b8dccf4e
+Additional line 17 in file 4 with random content: d377d2289334466e943a
+Additional line 18 in file 4 with random content: c1529693b5033aa5dd21
+Additional line 19 in file 4 with random content: d360f867f2297a6a9ffe
+Additional line 20 in file 4 with random content: 8d104417fd2d53ee2991
+Additional line 21 in file 4 with random content: 4ac81c28b6e4eb98dfbb
+Additional line 22 in file 4 with random content: 037ac8d847421e7ae57a
+Additional line 23 in file 4 with random content: 98e81bad1975483b7129
+Additional line 24 in file 4 with random content: 0c4127922da20cb7ebad
+Additional line 25 in file 4 with random content: be14ca30b6699e96aa92
+Additional line 26 in file 4 with random content: d4ed7d3c9c65e99b6ed4
+Additional line 27 in file 4 with random content: af92f113c830abd8bc16
+Additional line 28 in file 4 with random content: c23591061bc54d99ebe2
+Additional line 29 in file 4 with random content: db930071232016d30fe7
+Additional line 30 in file 4 with random content: 3578547b40022357350c
+Additional line 31 in file 4 with random content: a7818151b07887ee5bb4
+Additional line 32 in file 4 with random content: 57b2af18fd921d4e6e54
+Additional line 33 in file 4 with random content: a079caec56d68daa98b4
+Additional line 34 in file 4 with random content: 1d9b66b2dde2ee914a32
+Additional line 35 in file 4 with random content: 6cdcd1b0db83a9d0c3b0
+Additional line 36 in file 4 with random content: 424b6e70b2a0d0e3c031
+Additional line 37 in file 4 with random content: 603513cd425261128c3a
+Additional line 38 in file 4 with random content: a06a33259b25f6b56bdd
+Additional line 39 in file 4 with random content: 1061a4ca49b8f55913d9
+Additional line 40 in file 4 with random content: 7364d69d1bec88469b08
+Additional line 41 in file 4 with random content: 3c2ba45ec431a020ce01
+Additional line 42 in file 4 with random content: aa7407bf11885443f416
+Additional line 43 in file 4 with random content: a224d732e12cdbcff8c5
+Additional line 44 in file 4 with random content: 18e5ce000a973c1a961b
+Additional line 45 in file 4 with random content: 9d68ad3c9decb16e0db1
+Additional line 46 in file 4 with random content: a710e81c42bfcbd4a5bf
+Additional line 47 in file 4 with random content: 9dfd0e0fe67e663d427f
+Additional line 48 in file 4 with random content: 0e06e9ddfd21ca86ffe3
+Additional line 49 in file 4 with random content: 59300beb45dd0b184306
+Additional line 50 in file 4 with random content: 61d61a90700d938cd3a4

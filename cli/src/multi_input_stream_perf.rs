@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -13,8 +13,14 @@ struct Args {
     #[arg(short = 'r', long = "rules", required = true, num_args = 1..)]
     yara_files: Vec<PathBuf>,
 
-    #[arg(short = 'i', long = "input", required = true, num_args = 1..)]
+    #[arg(short = 'i', long = "input", num_args = 1.., conflicts_with = "directory")]
     input_files: Vec<String>,
+
+    #[arg(short = 'd', long = "directory", conflicts_with = "input_files")]
+    directory: Option<PathBuf>,
+
+    #[arg(short = 'p', long = "parallel", default_value = "10", help = "Number of files to process in parallel")]
+    parallel_count: usize,
 
     #[arg(short = 'c', long = "chunk-size", required = true)]
     chunk_size: usize,
@@ -44,16 +50,52 @@ fn main() -> Result<()> {
     println!("Compiled {} YARA rules", rules.iter().len());
     println!();
     
-    // Create scanner
-    let mut scanner = MultiStreamScanner::new(&rules);
+    // Get all input files
+    let all_input_files = if let Some(dir) = args.directory {
+        // Scan directory for files
+        println!("Scanning directory: {}", dir.display());
+        let mut files = Vec::new();
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                files.push(path.to_string_lossy().to_string());
+            }
+        }
+        println!("Found {} files in directory", files.len());
+        files
+    } else {
+        // Use provided input files
+        args.input_files.clone()
+    };
     
-    // Parse input files and UUIDs
-    let mut readers = Vec::new();
-    let mut uuids = Vec::new();
-    let mut file_paths = Vec::new();
-    let mut active_files = Vec::new();  // Track which files are still active
+    if all_input_files.is_empty() {
+        println!("No input files found");
+        return Ok(());
+    }
     
-    for (i, input) in args.input_files.iter().enumerate() {
+    // Process files in batches
+    let total_files = all_input_files.len();
+    let mut batch_start = 0;
+    let mut batch_num = 1;
+    
+    while batch_start < total_files {
+        let batch_end = std::cmp::min(batch_start + args.parallel_count, total_files);
+        let batch_files = &all_input_files[batch_start..batch_end];
+        
+        println!("\n===== Processing batch {} ({} files) =====", batch_num, batch_files.len());
+        println!("Files {} to {} of {}", batch_start + 1, batch_end, total_files);
+        
+        // Create scanner for this batch
+        let mut scanner = MultiStreamScanner::new(&rules);
+        
+        // Parse input files and UUIDs
+        let mut readers = Vec::new();
+        let mut uuids = Vec::new();
+        let mut file_paths = Vec::new();
+        let mut active_files = Vec::new();  // Track which files are still active
+        
+        for (i, input) in batch_files.iter().enumerate() {
         let (path, uuid) = if let Some(colon_pos) = input.rfind(':') {
             // Check if what follows the colon looks like a UUID
             let potential_uuid = &input[colon_pos + 1..];
@@ -77,24 +119,23 @@ fn main() -> Result<()> {
         uuids.push(uuid);
         file_paths.push(path);
         active_files.push(i);
-    }
-    
-    println!("\nProcessing {} files with chunk size {}", file_paths.len(), args.chunk_size);
-    
-    let start = Instant::now();
-    let mut round = 1;
-    
-    // Track previous match counts for each stream
-    let mut prev_matches: Vec<usize> = vec![0; file_paths.len()];
-    
-    // Process in round-robin
-    while !active_files.is_empty() {
+        }
+        
+        println!("\nProcessing {} files with chunk size {}", file_paths.len(), args.chunk_size);
+        
+        let batch_start_time = Instant::now();
+        let mut round = 1;
+        
+        // Track previous match counts for each stream
+        let mut prev_matches: Vec<usize> = vec![0; file_paths.len()];
+        
+        // Process in round-robin
+        while !active_files.is_empty() {
         let mut processed = 0;
         let mut exhausted_indices = Vec::new();
         
         for (idx, &file_idx) in active_files.iter().enumerate() {
             let mut chunk = Vec::new();
-            let mut lines = 0;
             
             for _ in 0..args.chunk_size {
                 let mut line = String::new();
@@ -102,7 +143,6 @@ fn main() -> Result<()> {
                     break;
                 }
                 chunk.extend_from_slice(line.as_bytes());
-                lines += 1;
             }
             
             if !chunk.is_empty() {
@@ -149,21 +189,29 @@ fn main() -> Result<()> {
         if processed > 0 {
             round += 1;
         }
+        }
+        
+        println!("\nBatch {} completed in {:?}", batch_num, batch_start_time.elapsed());
+        
+        // Print final match summary for this batch
+        println!("\nBatch {} match summary:", batch_num);
+        for i in 0..uuids.len() {
+            let results = scanner.get_matches(&uuids[i]).unwrap();
+            let total_matches = results.matching_rules().count();
+            println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], total_matches);
+        }
+        
+        // Print detailed memory statistics for this batch
+        println!("\nBatch {} memory statistics:", batch_num);
+        println!("{}", scanner.memory_stats());
+        
+        // Move to next batch
+        batch_start = batch_end;
+        batch_num += 1;
     }
     
-    println!("\nCompleted in {:?}", start.elapsed());
-    
-    // Print final match summary
-    println!("\nFinal match summary:");
-    for i in 0..uuids.len() {
-        let results = scanner.get_matches(&uuids[i]).unwrap();
-        let total_matches = results.matching_rules().count();
-        println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], total_matches);
-    }
-    
-    // Print detailed memory statistics
-    println!("\nFinal memory statistics:");
-    println!("{}", scanner.memory_stats());
+    println!("\n===== All batches completed =====");
+    println!("Total files processed: {}", total_files);
     
     Ok(())
 }

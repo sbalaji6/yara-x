@@ -1,0 +1,50 @@
+Mixed content file 3
+Some normal text here
+But also contains: malware_signature_123
+And network data: 192.168.1.100
+Mixed patterns throughout
+Line 6 hybrid content
+Line 7 combination data
+Line 8 merged information
+Line 9 blended patterns
+Line 10 conclusion
+Additional line 11 in file 3 with random content: eac74b51f30400766115
+Additional line 12 in file 3 with random content: e8c7dfb897fe2128dba8
+Additional line 13 in file 3 with random content: 70dafa73be54251acfb5
+Additional line 14 in file 3 with random content: 3d64aed4b2ffa9d3344a
+Additional line 15 in file 3 with random content: 23f9d97e1ed4af0ef964
+Additional line 16 in file 3 with random content: 2dd558f4c0d3c055af19
+Additional line 17 in file 3 with random content: eed303d6222cd6d38bf8
+Additional line 18 in file 3 with random content: 1d0856aef0c62ef19e81
+Additional line 19 in file 3 with random content: ac08e8c3c7499d7decce
+Additional line 20 in file 3 with random content: ee9d15b28263bff323f7
+Additional line 21 in file 3 with random content: 5552fe9be91cbfe2b3a3
+Additional line 22 in file 3 with random content: e8c5d96062d222bad100
+Additional line 23 in file 3 with random content: 1ff9c146d9ef35958a36
+Additional line 24 in file 3 with random content: b0d9472cbe2c895cf206
+Additional line 25 in file 3 with random content: 5e87797347a35f463300
+Additional line 26 in file 3 with random content: 87bf4ea656d84575b43c
+Additional line 27 in file 3 with random content: aaad7063b8936c84f242
+Additional line 28 in file 3 with random content: 8de9c040fafe88c44299
+Additional line 29 in file 3 with random content: aed2d62e933ed40f5695
+Additional line 30 in file 3 with random content: b3268a6299f75660d6ea
+Additional line 31 in file 3 with random content: 579445d44d2b01e996e0
+Additional line 32 in file 3 with random content: ab51ee36efe7bf802b7c
+Additional line 33 in file 3 with random content: 8306d20afbe4d9fa083f
+Additional line 34 in file 3 with random content: c97b5f04189436e61749
+Additional line 35 in file 3 with random content: a787700ef4291a2ec8ed
+Additional line 36 in file 3 with random content: 32fb83299ad636f538f7
+Additional line 37 in file 3 with random content: 9d7cae4d28b4df250387
+Additional line 38 in file 3 with random content: 2e3ea2e1f85ecc9d071d
+Additional line 39 in file 3 with random content: 3940bbd694c1a90d58db
+Additional line 40 in file 3 with random content: 265b914ff6119e0e0d20
+Additional line 41 in file 3 with random content: 344e652160e82e045ce5
+Additional line 42 in file 3 with random content: fc0f83ac5a59157f20c7
+Additional line 43 in file 3 with random content: 885182879b753219eeea
+Additional line 44 in file 3 with random content: dd92ee64f517361eeaf0
+Additional line 45 in file 3 with random content: c4b50c054df20c59676c
+Additional line 46 in file 3 with random content: 34f7c28dc78af4f8b969
+Additional line 47 in file 3 with random content: 54d30241efe547ce45de
+Additional line 48 in file 3 with random content: 413e4f4bafc3aaa3c5d6
+Additional line 49 in file 3 with random content: 060f3d2a91e19067aecb
+Additional line 50 in file 3 with random content: 03cdb64c6b7996bab23c
