@@ -50,32 +50,34 @@ fn main() -> Result<()> {
     // Open files
     let mut readers = Vec::new();
     let mut uuids = Vec::new();
-    for path in &args.input_files {
+    let mut active_files = Vec::new();  // Track which files are still active
+    for (i, path) in args.input_files.iter().enumerate() {
         let file = File::open(path)?;
         readers.push(BufReader::new(file));
         uuids.push(Uuid::new_v4());
+        active_files.push(i);  // Initially all files are active
     }
     
     println!("Processing {} files with chunk size {}", args.input_files.len(), args.chunk_size);
     
     let start = Instant::now();
-    let mut active = args.input_files.len();
     let mut round = 1;
     
     // Track previous match counts for each stream
     let mut prev_matches: Vec<usize> = vec![0; args.input_files.len()];
     
     // Process in round-robin
-    while active > 0 {
+    while !active_files.is_empty() {
         let mut processed = 0;
+        let mut exhausted_indices = Vec::new();
         
-        for i in 0..readers.len() {
+        for (idx, &file_idx) in active_files.iter().enumerate() {
             let mut chunk = Vec::new();
             let mut lines = 0;
             
             for _ in 0..args.chunk_size {
                 let mut line = String::new();
-                if readers[i].read_line(&mut line)? == 0 {
+                if readers[file_idx].read_line(&mut line)? == 0 {
                     break;
                 }
                 chunk.extend_from_slice(line.as_bytes());
@@ -84,17 +86,18 @@ fn main() -> Result<()> {
             
             if !chunk.is_empty() {
                 let chunk_start = Instant::now();
-                scanner.scan_chunk(&uuids[i], &chunk)?;
+                scanner.scan_chunk(&uuids[file_idx], &chunk)?;
                 let chunk_elapsed = chunk_start.elapsed();
                 
                 // Get current matches for this stream
-                let results = scanner.get_matches(&uuids[i]).unwrap();
+                let results = scanner.get_matches(&uuids[file_idx]).unwrap();
                 let current_matches = results.matching_rules().count();
-                let new_matches = current_matches - prev_matches[i];
-                prev_matches[i] = current_matches;
+                let new_matches = current_matches - prev_matches[file_idx];
+                prev_matches[file_idx] = current_matches;
                 
-                println!("Round {} - File {}: {} bytes in {:?}, {} new matches (total: {})", 
-                    round, i, chunk.len(), chunk_elapsed, new_matches, current_matches);
+                println!("Round {} - File {} ({}): {} bytes in {:?}, {} new matches (total: {})", 
+                    round, file_idx, args.input_files[file_idx].display(), 
+                    chunk.len(), chunk_elapsed, new_matches, current_matches);
                 
                 // Show all currently matching rules
                 if current_matches > 0 {
@@ -111,8 +114,15 @@ fn main() -> Result<()> {
                 
                 processed += 1;
             } else {
-                active -= 1;
+                // Mark this file index for removal
+                exhausted_indices.push(idx);
+                println!("Round {} - File {} ({}) exhausted", round, file_idx, args.input_files[file_idx].display());
             }
+        }
+        
+        // Remove exhausted files from active list (in reverse order to maintain indices)
+        for &idx in exhausted_indices.iter().rev() {
+            active_files.remove(idx);
         }
         
         if processed > 0 {
