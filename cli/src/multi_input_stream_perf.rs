@@ -91,15 +91,15 @@ fn main() -> Result<()> {
     let mut batch_start = 0;
     let mut batch_num = 1;
     
+    // Create scanner once for all batches
+    let mut scanner = MultiStreamScanner::new(&rules);
+    
     while batch_start < total_files {
         let batch_end = std::cmp::min(batch_start + args.parallel_count, total_files);
         let batch_files = &all_input_files[batch_start..batch_end];
         
         println!("\n===== Processing batch {} ({} files) =====", batch_num, batch_files.len());
         println!("Files {} to {} of {}", batch_start + 1, batch_end, total_files);
-        
-        // Create scanner for this batch
-        let mut scanner = MultiStreamScanner::new(&rules);
         
         // Parse input files and UUIDs
         let mut readers = Vec::new();
@@ -224,6 +224,20 @@ fn main() -> Result<()> {
     
     println!("\n===== All batches completed =====");
     println!("Total files processed: {}", total_files);
+    
+    // Calculate total lines processed across all streams
+    let mut total_lines_processed = 0u64;
+    for stream_id in scanner.active_streams() {
+        if let Some(lines) = scanner.lines_processed(&stream_id) {
+            total_lines_processed += lines;
+        }
+    }
+    println!("Total lines processed: {}", total_lines_processed);
+    
+    // Print final memory statistics
+    println!("\nFinal memory statistics:");
+    println!("{}", scanner.memory_stats());
+    println!("Total memory consumed for cache: {} bytes", scanner.contexts_memory_usage());
     
     Ok(())
 }
