@@ -29,6 +29,25 @@ struct Args {
     relaxed_re_syntax: bool,
 }
 
+fn scan_directory_recursive(dir: &PathBuf) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_file() {
+            files.push(path.to_string_lossy().to_string());
+        } else if path.is_dir() {
+            // Recursively scan subdirectories
+            let sub_files = scan_directory_recursive(&path)?;
+            files.extend(sub_files);
+        }
+    }
+    
+    Ok(files)
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     
@@ -52,17 +71,10 @@ fn main() -> Result<()> {
     
     // Get all input files
     let all_input_files = if let Some(dir) = args.directory {
-        // Scan directory for files
-        println!("Scanning directory: {}", dir.display());
-        let mut files = Vec::new();
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                files.push(path.to_string_lossy().to_string());
-            }
-        }
-        println!("Found {} files in directory", files.len());
+        // Scan directory recursively for files
+        println!("Scanning directory recursively: {}", dir.display());
+        let files = scan_directory_recursive(&dir)?;
+        println!("Found {} files in directory tree", files.len());
         files
     } else {
         // Use provided input files
