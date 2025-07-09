@@ -163,10 +163,15 @@ fn main() -> Result<()> {
                 let chunk_elapsed = chunk_start.elapsed();
                 
                 // Get current matches for this stream
-                let results = scanner.get_matches(&uuids[file_idx]).unwrap();
-                let current_matches = results.matching_rules().count();
-                let new_matches = current_matches - prev_matches[file_idx];
-                prev_matches[file_idx] = current_matches;
+                let (current_matches, new_matches) = if let Some(results) = scanner.get_matches(&uuids[file_idx]) {
+                    let count = results.matching_rules().count();
+                    let new = count - prev_matches[file_idx];
+                    prev_matches[file_idx] = count;
+                    (count, new)
+                } else {
+                    // No matches yet for this stream
+                    (0, 0)
+                };
                 
                 println!("Round {} - File {} ({}): {} bytes in {:?}, {} new matches (total: {})", 
                     round, file_idx, file_paths[file_idx].display(), 
@@ -174,9 +179,11 @@ fn main() -> Result<()> {
                 
                 // Show all currently matching rules
                 if current_matches > 0 {
-                    println!("        Currently matching rules:");
-                    for rule in results.matching_rules() {
-                        println!("          - {}", rule.identifier());
+                    if let Some(results) = scanner.get_matches(&uuids[file_idx]) {
+                        println!("        Currently matching rules:");
+                        for rule in results.matching_rules() {
+                            println!("          - {}", rule.identifier());
+                        }
                     }
                 }
                 
@@ -208,8 +215,11 @@ fn main() -> Result<()> {
         // Print final match summary for this batch
         println!("\nBatch {} match summary:", batch_num);
         for i in 0..uuids.len() {
-            let results = scanner.get_matches(&uuids[i]).unwrap();
-            let total_matches = results.matching_rules().count();
+            let total_matches = if let Some(results) = scanner.get_matches(&uuids[i]) {
+                results.matching_rules().count()
+            } else {
+                0
+            };
             println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], total_matches);
         }
         
