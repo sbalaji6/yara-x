@@ -1482,10 +1482,31 @@ macro_rules! gen_xint_fn {
             offset: i64,
         ) -> Option<RangedInteger<$min, $max>> {
             let offset = usize::try_from(offset).ok()?;
+            
+            // In streaming mode, we need to handle global offsets correctly
+            let ctx = caller.data();
+            let actual_offset = if ctx.global_scan_offset > 0 {
+                // We're in streaming mode - need to convert global offset to chunk-relative
+                let global_offset = offset;
+                
+                // Check if the requested global offset is within the current chunk
+                if global_offset < ctx.global_scan_offset as usize || 
+                   global_offset >= (ctx.global_scan_offset + ctx.scanned_data_len as u64) as usize {
+                    // Offset is outside current chunk - return None
+                    return None;
+                }
+                
+                // Convert to chunk-relative offset
+                (global_offset as u64 - ctx.global_scan_offset) as usize
+            } else {
+                // Regular scanning mode - use offset as-is
+                offset
+            };
+            
             caller
                 .data()
                 .scanned_data()
-                .get(offset..offset + mem::size_of::<$return_type>())
+                .get(actual_offset..actual_offset + mem::size_of::<$return_type>())
                 .map(|bytes| {
                     <$return_type>::$from_fn(bytes.try_into().unwrap()) as i64
                 })

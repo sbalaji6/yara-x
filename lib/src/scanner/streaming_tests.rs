@@ -500,4 +500,81 @@ mod tests {
         let results = scanner.get_matches();
         assert_eq!(results.matching_rules().count(), 1, "Rule should match with marker at global offset 20");
     }
+
+    #[test]
+    fn test_offset_access_streaming() {
+        // Create a YARA rule that uses offset-based data access
+        let rule = r#"
+            rule test_offset_access {
+                strings:
+                    $pattern = "MARKER"
+                condition:
+                    $pattern and uint32(@pattern[1] + 6) == 0x41424344
+            }
+        "#;
+
+        // Compile the rule
+        let mut compiler = Compiler::new();
+        compiler.add_source(rule).unwrap();
+        let rules = compiler.build();
+
+        // Test 1: All data in one chunk (should match)
+        let data1 = b"MARKER\x44\x43\x42\x41"; // "MARKER" + "DCBA" (0x41424344 in LE)
+        let mut scanner = StreamingScanner::new(&rules);
+        scanner.scan_chunk(data1).unwrap();
+        let matches = scanner.get_matches();
+        assert_eq!(matches.matching_rules().count(), 1, "Should match when all data is in one chunk");
+
+        // Test 2: Pattern in first chunk, but required data is NOT in second chunk
+        // Pattern is at offset 0, so @pattern[1]+6 = 6, but chunk2 starts at offset 20
+        let chunk1 = b"MARKER01234567890123"; // 20 bytes, pattern at offset 0
+        let chunk2 = b"ABCDEFGHIJ"; // This starts at offset 20, so offset 6 is not accessible
+        
+        let mut scanner2 = StreamingScanner::new(&rules);
+        scanner2.scan_chunk(chunk1).unwrap();
+        scanner2.scan_chunk(chunk2).unwrap();
+        let matches2 = scanner2.get_matches();
+        assert_eq!(matches2.matching_rules().count(), 0, "Should NOT match when offset data is in previous chunk");
+        
+        // Test 2b: Pattern in first chunk, offset data IS in second chunk (should match)
+        let chunk1b = b"PREFIXMARKER"; // Pattern at offset 6, chunk is 12 bytes
+        let chunk2b = b"\x44\x43\x42\x41more"; // Data at offset 12 (which is @pattern[1]+6)
+        
+        let mut scanner2b = StreamingScanner::new(&rules);
+        scanner2b.scan_chunk(chunk1b).unwrap();
+        scanner2b.scan_chunk(chunk2b).unwrap();
+        let matches2b = scanner2b.get_matches();
+        assert_eq!(matches2b.matching_rules().count(), 1, "Should match when offset data IS accessible in current chunk");
+
+        // Test 3: Empty chunk evaluation
+        let mut scanner3 = StreamingScanner::new(&rules);
+        scanner3.scan_chunk(b"MARKER\x44\x43\x42\x41").unwrap();
+        scanner3.scan_chunk(&[]).unwrap(); // Empty chunk
+        let matches3 = scanner3.get_matches();
+        assert_eq!(matches3.matching_rules().count(), 1, "Should still match after empty chunk");
+    }
+
+    #[test]
+    fn test_offset_out_of_bounds() {
+        // Rule that tries to access data beyond the chunk
+        let rule = r#"
+            rule test_out_of_bounds {
+                strings:
+                    $a = "START"
+                condition:
+                    $a and uint8(@a[1] + 1000) == 0xFF
+            }
+        "#;
+
+        let mut compiler = Compiler::new();
+        compiler.add_source(rule).unwrap();
+        let rules = compiler.build();
+
+        // Small chunk where offset+1000 is out of bounds
+        let data = b"START12345";
+        let mut scanner = StreamingScanner::new(&rules);
+        scanner.scan_chunk(data).unwrap();
+        let matches = scanner.get_matches();
+        assert_eq!(matches.matching_rules().count(), 0, "Should not match when offset is out of bounds");
+    }
 }
