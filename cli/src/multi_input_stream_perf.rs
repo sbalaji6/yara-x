@@ -183,6 +183,23 @@ fn main() -> Result<()> {
                         println!("        Currently matching rules:");
                         for rule in results.matching_rules() {
                             println!("          - {}", rule.identifier());
+                            
+                            // Print trace IDs for this rule's matches
+                            let mut trace_ids = Vec::new();
+                            for pattern in rule.patterns() {
+                                for m in pattern.matches() {
+                                    if let Some(trace_id) = m.trace_id() {
+                                        trace_ids.push(trace_id.to_string());
+                                    }
+                                }
+                            }
+                            
+                            if !trace_ids.is_empty() {
+                                // Remove duplicates and sort
+                                trace_ids.sort();
+                                trace_ids.dedup();
+                                println!("            Trace IDs: {:?}", trace_ids);
+                            }
                         }
                     }
                 }
@@ -215,12 +232,30 @@ fn main() -> Result<()> {
         // Print final match summary for this batch
         println!("\nBatch {} match summary:", batch_num);
         for i in 0..uuids.len() {
-            let total_matches = if let Some(results) = scanner.get_matches(&uuids[i]) {
-                results.matching_rules().count()
+            if let Some(results) = scanner.get_matches(&uuids[i]) {
+                let matching_rules: Vec<_> = results.matching_rules().collect();
+                println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], matching_rules.len());
+                
+                // Collect all unique trace IDs across all rules for this file
+                let mut all_trace_ids = std::collections::HashSet::new();
+                for rule in matching_rules {
+                    for pattern in rule.patterns() {
+                        for m in pattern.matches() {
+                            if let Some(trace_id) = m.trace_id() {
+                                all_trace_ids.insert(trace_id.to_string());
+                            }
+                        }
+                    }
+                }
+                
+                if !all_trace_ids.is_empty() {
+                    let mut sorted_trace_ids: Vec<_> = all_trace_ids.into_iter().collect();
+                    sorted_trace_ids.sort();
+                    println!("    All trace IDs for this file: {:?}", sorted_trace_ids);
+                }
             } else {
-                0
-            };
-            println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], total_matches);
+                println!("  File {} (UUID: {}): 0 total rules matched", i, uuids[i]);
+            }
         }
         
         // Print detailed memory statistics for this batch
