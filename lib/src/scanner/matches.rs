@@ -216,6 +216,11 @@ impl PatternMatches {
         self.matches.get(&pattern_id)
     }
 
+    /// Returns an iterator over all pattern matches.
+    pub fn iter(&self) -> impl Iterator<Item = (&PatternId, &MatchList)> {
+        self.matches.iter()
+    }
+
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.matches.is_empty()

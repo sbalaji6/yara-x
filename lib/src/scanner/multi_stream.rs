@@ -26,6 +26,10 @@ use crate::wasm::{self, MATCHING_RULES_BITMAP_BASE};
 
 static INIT_HEARTBEAT: Once = Once::new();
 
+/// Callback invoked when a rule matches with its trace IDs.
+/// Parameters: (rule_namespace, stream_id, rule_identifier, trace_ids)
+pub type RuleMatchCallback = Box<dyn FnMut(&str, &Uuid, &str, &[String])>;
+
 /// Helper struct to access WASM memory bitmaps
 struct StreamBitmaps {
     rule_bitmap: Vec<u8>,
@@ -174,6 +178,8 @@ pub struct MultiStreamScanner<'r> {
     timeout: Option<Duration>,
     /// Flag to track if modules have been initialized
     modules_initialized: bool,
+    /// Optional callback for rule matches with trace IDs
+    rule_match_callback: Option<RuleMatchCallback>,
 }
 
 impl<'r> MultiStreamScanner<'r> {
@@ -297,12 +303,22 @@ impl<'r> MultiStreamScanner<'r> {
             active_stream: None,
             timeout: None,
             modules_initialized: false,
+            rule_match_callback: None,
         }
     }
 
     /// Sets a timeout for scan operations.
     pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Sets a callback that is invoked after each scan for all matching rules with their trace IDs.
+    pub fn set_rule_match_callback<F>(&mut self, callback: F) -> &mut Self
+    where
+        F: FnMut(&str, &Uuid, &str, &[String]) + 'static,
+    {
+        self.rule_match_callback = Some(Box::new(callback));
         self
     }
 
@@ -456,6 +472,47 @@ impl<'r> MultiStreamScanner<'r> {
             }
             
             // Pattern matches and rules have been updated
+        }
+
+        // Invoke callback for all currently matching rules if callback is set
+        if self.rule_match_callback.is_some() {
+            let ctx = self.wasm_store.data();
+            
+            // Process all non-private matching rules
+            for rule_id in &ctx.non_private_matching_rules {
+                // Collect trace IDs for this rule
+                let mut trace_ids = std::collections::HashSet::new();
+                let rule_info = self.rules.get(*rule_id);
+                
+                // Get patterns for this rule
+                for (_, _, pattern_id) in &rule_info.patterns {
+                    if let Some(matches) = ctx.pattern_matches.get(*pattern_id) {
+                        for m in matches.iter() {
+                            if let Some(trace_id) = &m.trace_id {
+                                trace_ids.insert(trace_id.clone());
+                            }
+                        }
+                    }
+                }
+                
+                // Only invoke callback if there are matches with trace IDs or if the rule is matching
+                if !trace_ids.is_empty() || !rule_info.patterns.is_empty() {
+                    let trace_ids_vec: Vec<String> = trace_ids.into_iter().collect();
+                    
+                    // Get namespace and identifier names from the identifier pool
+                    let namespace = self.rules.ident_pool().get(rule_info.namespace_ident_id).unwrap();
+                    let identifier = self.rules.ident_pool().get(rule_info.ident_id).unwrap();
+                    
+                    if let Some(ref mut callback) = self.rule_match_callback {
+                        callback(
+                            namespace,
+                            stream_id,
+                            identifier,
+                            &trace_ids_vec
+                        );
+                    }
+                }
+            }
         }
 
         // Save the updated scanner state back to the stream context first
@@ -698,7 +755,7 @@ impl<'r> MultiStreamScanner<'r> {
         // Base HashMap overhead (approximately)
         total += std::mem::size_of::<HashMap<Uuid, StreamContext>>();
         
-        for (uuid, context) in &self.contexts {
+        for (_uuid, context) in &self.contexts {
             // UUID size
             total += std::mem::size_of::<Uuid>();
             
@@ -725,7 +782,28 @@ impl<'r> MultiStreamScanner<'r> {
             // FxHashSet for limit_reached
             total += context.limit_reached.capacity() * std::mem::size_of::<PatternId>();
             
-            // Note: pattern_matches, unconfirmed_matches, and module_outputs 
+            // PatternMatches - this includes the trace IDs
+            // Base FxHashMap overhead for pattern_matches
+            total += std::mem::size_of::<FxHashMap<PatternId, crate::scanner::matches::MatchList>>();
+            
+            // For each pattern with matches, calculate the memory usage
+            for (_, match_list) in context.pattern_matches.iter() {
+                // Each Match struct contains:
+                // - range: Range<usize> (16 bytes)
+                // - xor_key: Option<u8> (2 bytes)
+                // - trace_id: Option<String> (24 bytes for Option<String> itself)
+                total += match_list.len() * std::mem::size_of::<crate::scanner::matches::Match>();
+                
+                // Add the actual string data for trace IDs
+                for m in match_list.iter() {
+                    if let Some(ref trace_id) = m.trace_id {
+                        // String capacity includes the actual string data
+                        total += trace_id.capacity();
+                    }
+                }
+            }
+            
+            // Note: unconfirmed_matches and module_outputs 
             // would need their own size calculation methods to be accurate
         }
         

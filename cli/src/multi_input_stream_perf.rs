@@ -94,6 +94,23 @@ fn main() -> Result<()> {
     // Create scanner once for all batches
     let mut scanner = MultiStreamScanner::new(&rules);
     
+    // Set up callback to print rule matches with trace IDs
+    println!("Setting up rule match callback...\n");
+    scanner.set_rule_match_callback(|namespace, stream_id, rule_name, trace_ids| {
+        println!("\n    *** YARA RULE MATCH DETECTED ***");
+        println!("    Rule: {}:{}", namespace, rule_name);
+        println!("    Stream: {}", stream_id);
+        if !trace_ids.is_empty() {
+            println!("    Trace IDs found: {}", trace_ids.len());
+            for (i, trace_id) in trace_ids.iter().enumerate() {
+                println!("      [{}] {}", i + 1, trace_id);
+            }
+        } else {
+            println!("    Trace IDs: (none extracted - check if log lines contain quoted strings)");
+        }
+        println!("    ***************************\n");
+    });
+    
     while batch_start < total_files {
         let batch_end = std::cmp::min(batch_start + args.parallel_count, total_files);
         let batch_files = &all_input_files[batch_start..batch_end];
@@ -183,23 +200,6 @@ fn main() -> Result<()> {
                         println!("        Currently matching rules:");
                         for rule in results.matching_rules() {
                             println!("          - {}", rule.identifier());
-                            
-                            // Print trace IDs for this rule's matches
-                            let mut trace_ids = Vec::new();
-                            for pattern in rule.patterns() {
-                                for m in pattern.matches() {
-                                    if let Some(trace_id) = m.trace_id() {
-                                        trace_ids.push(trace_id.to_string());
-                                    }
-                                }
-                            }
-                            
-                            if !trace_ids.is_empty() {
-                                // Remove duplicates and sort
-                                trace_ids.sort();
-                                trace_ids.dedup();
-                                println!("            Trace IDs: {:?}", trace_ids);
-                            }
                         }
                     }
                 }
@@ -235,24 +235,6 @@ fn main() -> Result<()> {
             if let Some(results) = scanner.get_matches(&uuids[i]) {
                 let matching_rules: Vec<_> = results.matching_rules().collect();
                 println!("  File {} (UUID: {}): {} total rules matched", i, uuids[i], matching_rules.len());
-                
-                // Collect all unique trace IDs across all rules for this file
-                let mut all_trace_ids = std::collections::HashSet::new();
-                for rule in matching_rules {
-                    for pattern in rule.patterns() {
-                        for m in pattern.matches() {
-                            if let Some(trace_id) = m.trace_id() {
-                                all_trace_ids.insert(trace_id.to_string());
-                            }
-                        }
-                    }
-                }
-                
-                if !all_trace_ids.is_empty() {
-                    let mut sorted_trace_ids: Vec<_> = all_trace_ids.into_iter().collect();
-                    sorted_trace_ids.sort();
-                    println!("    All trace IDs for this file: {:?}", sorted_trace_ids);
-                }
             } else {
                 println!("  File {} (UUID: {}): 0 total rules matched", i, uuids[i]);
             }
