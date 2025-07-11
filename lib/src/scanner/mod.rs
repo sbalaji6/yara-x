@@ -60,6 +60,9 @@ mod multi_stream_tests;
 #[cfg(test)]
 mod trace_id_test;
 
+#[cfg(test)]
+mod streaming_trace_id_test;
+
 pub use streaming::StreamingScanner;
 pub use multi_stream::MultiStreamScanner;
 

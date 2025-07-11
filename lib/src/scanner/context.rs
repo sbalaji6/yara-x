@@ -744,15 +744,17 @@ impl ScanContext<'_> {
         pattern_id: PatternId,
         mut match_: Match,
     ) {
+        // Extract trace_id from the matched line if not already set
+        // Must be done BEFORE adjusting offsets, as the match range is relative to current chunk
+        // Only attempt if scanned_data is available (not null in streaming mode)
+        if match_.trace_id.is_none() && !self.scanned_data.is_null() && self.scanned_data_len > 0 {
+            match_.trace_id = extract_trace_id(self.scanned_data(), &match_.range);
+        }
+        
         // Adjust match offset for streaming scanner
         if self.global_scan_offset > 0 {
             match_.range.start += self.global_scan_offset as usize;
             match_.range.end += self.global_scan_offset as usize;
-        }
-        
-        // Extract trace_id from the matched line if not already set
-        if match_.trace_id.is_none() {
-            match_.trace_id = extract_trace_id(self.scanned_data(), &match_.range);
         }
         match sub_pattern {
             SubPattern::Literal { .. }
@@ -889,7 +891,12 @@ impl ScanContext<'_> {
                     // valid, and we have a full match.
                     if let Some(tail_match_range) = &tail_match_range {
                         let full_range = match_range.start..tail_match_range.end;
-                        let trace_id = extract_trace_id(self.scanned_data(), &full_range);
+                        // Extract trace_id only if scanned_data is available
+                        let trace_id = if !self.scanned_data.is_null() && self.scanned_data_len > 0 {
+                            extract_trace_id(self.scanned_data(), &full_range)
+                        } else {
+                            None
+                        };
                         self.track_pattern_match(
                             pattern_id,
                             Match {
