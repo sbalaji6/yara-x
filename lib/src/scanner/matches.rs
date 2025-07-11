@@ -15,6 +15,8 @@ pub(crate) struct Match {
     /// where `k` is the XOR key (it may be 0). For any other type of
     /// pattern this is `None`.
     pub xor_key: Option<u8>,
+    /// The traceId extracted from the matched line (last string in double quotes).
+    pub trace_id: Option<String>,
 }
 
 /// Represents the list of matches for a pattern.
@@ -302,11 +304,11 @@ mod test {
     fn match_list() {
         let mut ml = MatchList::with_capacity(5);
 
-        ml.add(Match { range: (2..10), xor_key: None }, false);
-        ml.add(Match { range: (1..10), xor_key: None }, false);
-        ml.add(Match { range: (4..10), xor_key: None }, false);
-        ml.add(Match { range: (3..10), xor_key: None }, false);
-        ml.add(Match { range: (5..10), xor_key: None }, false);
+        ml.add(Match { range: (2..10), xor_key: None, trace_id: None }, false);
+        ml.add(Match { range: (1..10), xor_key: None, trace_id: None }, false);
+        ml.add(Match { range: (4..10), xor_key: None, trace_id: None }, false);
+        ml.add(Match { range: (3..10), xor_key: None, trace_id: None }, false);
+        ml.add(Match { range: (5..10), xor_key: None, trace_id: None }, false);
 
         assert_eq!(
             ml.iter().map(|m| m.range.clone()).collect::<Vec<Range<usize>>>(),

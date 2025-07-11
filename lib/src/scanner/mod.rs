@@ -57,6 +57,9 @@ mod streaming_tests;
 #[cfg(test)]
 mod multi_stream_tests;
 
+#[cfg(test)]
+mod trace_id_test;
+
 pub use streaming::StreamingScanner;
 pub use multi_stream::MultiStreamScanner;
 
@@ -992,6 +995,23 @@ impl<'a, 'r> ScanResults<'a, 'r> {
     /// Only returns the modules that produced some output.
     pub fn module_outputs(&self) -> ModuleOutputs<'a, 'r> {
         ModuleOutputs::new(self.ctx)
+    }
+
+    /// Returns all unique traceIds from all matches across all matching rules.
+    pub fn trace_ids(&self) -> Vec<String> {
+        let mut trace_ids = std::collections::HashSet::new();
+        
+        for rule in self.matching_rules() {
+            for pattern in rule.patterns() {
+                for mat in pattern.matches() {
+                    if let Some(trace_id) = mat.trace_id() {
+                        trace_ids.insert(trace_id.to_string());
+                    }
+                }
+            }
+        }
+        
+        trace_ids.into_iter().collect()
     }
 }
 

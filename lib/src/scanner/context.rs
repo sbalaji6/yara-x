@@ -524,7 +524,7 @@ impl ScanContext<'_> {
                         sub_pattern_id,
                         sub_pattern,
                         *pattern_id,
-                        Match { range: match_range, xor_key: None },
+                        Match { range: match_range, xor_key: None, trace_id: None },
                     );
                 }
 
@@ -749,6 +749,11 @@ impl ScanContext<'_> {
             match_.range.start += self.global_scan_offset as usize;
             match_.range.end += self.global_scan_offset as usize;
         }
+        
+        // Extract trace_id from the matched line if not already set
+        if match_.trace_id.is_none() {
+            match_.trace_id = extract_trace_id(self.scanned_data(), &match_.range);
+        }
         match sub_pattern {
             SubPattern::Literal { .. }
             | SubPattern::Xor { .. }
@@ -883,11 +888,14 @@ impl ScanContext<'_> {
                     // the tail matches. This indicates that the whole chain is
                     // valid, and we have a full match.
                     if let Some(tail_match_range) = &tail_match_range {
+                        let full_range = match_range.start..tail_match_range.end;
+                        let trace_id = extract_trace_id(self.scanned_data(), &full_range);
                         self.track_pattern_match(
                             pattern_id,
                             Match {
-                                range: match_range.start..tail_match_range.end,
+                                range: full_range,
                                 xor_key: None,
+                                trace_id,
                             },
                             flags.contains(SubPatternFlags::GreedyRegexp),
                         );
@@ -1011,6 +1019,7 @@ fn verify_literal_match(
             // The end of the range is exclusive.
             range: atom_pos..match_end,
             xor_key: None,
+            trace_id: None,
         })
     } else {
         None
@@ -1063,6 +1072,56 @@ fn verify_full_word(
     }
 
     true
+}
+
+/// Extracts the traceId from the matched line by finding the last string
+/// enclosed in double quotes.
+fn extract_trace_id(scanned_data: &[u8], match_range: &Range<usize>) -> Option<String> {
+    // Find the start of the line containing the match
+    let mut line_start = match_range.start;
+    while line_start > 0 && scanned_data[line_start - 1] != b'\n' {
+        line_start -= 1;
+    }
+    
+    // Find the end of the line containing the match
+    let mut line_end = match_range.end;
+    while line_end < scanned_data.len() && scanned_data[line_end] != b'\n' {
+        line_end += 1;
+    }
+    
+    // Get the line as a slice
+    let line = &scanned_data[line_start..line_end];
+    
+    // Find all strings enclosed in double quotes
+    let mut last_quoted_string = None;
+    let mut i = 0;
+    while i < line.len() {
+        if line[i] == b'"' {
+            let quote_start = i;
+            i += 1;
+            // Find the closing quote
+            while i < line.len() && line[i] != b'"' {
+                // Handle escaped quotes
+                if line[i] == b'\\' && i + 1 < line.len() && line[i + 1] == b'"' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            if i < line.len() && line[i] == b'"' {
+                // Found a complete quoted string
+                let quoted_content = &line[quote_start + 1..i];
+                if let Ok(s) = std::str::from_utf8(quoted_content) {
+                    last_quoted_string = Some(s.to_string());
+                }
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    
+    last_quoted_string
 }
 
 /// When some `atom` belonging to a regexp is found at `atom_pos`, verify
@@ -1131,7 +1190,7 @@ fn verify_regexp_match(
                     let range =
                         atom_pos - bck_match_len..atom_pos + fwd_match_len;
                     if verify_full_word(scanned_data, &range, flags, None) {
-                        f(Match { range, xor_key: None });
+                        f(Match { range, xor_key: None, trace_id: None });
                     }
                     Action::Continue
                 },
@@ -1146,7 +1205,7 @@ fn verify_regexp_match(
                     let range =
                         atom_pos - bck_match_len..atom_pos + fwd_match_len;
                     if verify_full_word(scanned_data, &range, flags, None) {
-                        f(Match { range, xor_key: None });
+                        f(Match { range, xor_key: None, trace_id: None });
                     }
                     Action::Continue
                 },
@@ -1155,7 +1214,7 @@ fn verify_regexp_match(
     } else {
         let range = atom_pos..atom_pos + fwd_match_len;
         if verify_full_word(scanned_data, &range, flags, None) {
-            f(Match { range, xor_key: None });
+            f(Match { range, xor_key: None, trace_id: None });
         }
     }
 }
@@ -1202,7 +1261,7 @@ fn verify_xor_match(
     }
 
     if &scanned_data[match_range.clone()] == pattern.as_bytes() {
-        Some(Match { range: match_range, xor_key: Some(key) })
+        Some(Match { range: match_range, xor_key: Some(key), trace_id: None })
     } else {
         None
     }
@@ -1346,7 +1405,7 @@ fn verify_base64_match(
         decoded.as_ref().ok()?.get(padding..padding + pattern.len())?;
 
     if pattern.eq(decoded_pattern) {
-        Some(Match { range: atom_pos..atom_pos + match_len, xor_key: None })
+        Some(Match { range: atom_pos..atom_pos + match_len, xor_key: None, trace_id: None })
     } else {
         None
     }

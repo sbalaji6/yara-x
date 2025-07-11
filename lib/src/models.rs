@@ -64,6 +64,21 @@ impl<'a, 'r> Rule<'a, 'r> {
             len: self.rule_info.patterns.len(),
         }
     }
+
+    /// Returns all unique traceIds from all matches of this rule.
+    pub fn trace_ids(&self) -> Vec<String> {
+        let mut trace_ids = std::collections::HashSet::new();
+        
+        for pattern in self.patterns() {
+            for mat in pattern.matches() {
+                if let Some(trace_id) = mat.trace_id() {
+                    trace_ids.insert(trace_id.to_string());
+                }
+            }
+        }
+        
+        trace_ids.into_iter().collect()
+    }
 }
 
 /// A metadata value.
@@ -289,6 +304,19 @@ impl<'a, 'r> Pattern<'a, 'r> {
             }),
         }
     }
+
+    /// Returns all unique traceIds from matches of this pattern.
+    pub fn trace_ids(&self) -> Vec<String> {
+        let mut trace_ids = std::collections::HashSet::new();
+        
+        for mat in self.matches() {
+            if let Some(trace_id) = mat.trace_id() {
+                trace_ids.insert(trace_id.to_string());
+            }
+        }
+        
+        trace_ids.into_iter().collect()
+    }
 }
 
 /// Iterator that returns the matches for a pattern.
@@ -336,5 +364,11 @@ impl<'a> Match<'a> {
     #[inline]
     pub fn xor_key(&self) -> Option<u8> {
         self.inner.xor_key
+    }
+
+    /// The traceId extracted from the matched line (last string in double quotes).
+    #[inline]
+    pub fn trace_id(&self) -> Option<&str> {
+        self.inner.trace_id.as_deref()
     }
 }
