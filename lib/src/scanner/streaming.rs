@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
+use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Once;
 use std::thread;
@@ -17,6 +18,7 @@ use crate::models::Rule;
 use crate::modules;
 use crate::scanner::context::ScanContext;
 use crate::scanner::matches::PatternMatches;
+use crate::scanner::offset_cache::OffsetCache;
 use crate::scanner::{ScanError, HEARTBEAT_COUNTER};
 use crate::types::{Struct, TypeValue};
 use crate::variables::VariableError;
@@ -122,6 +124,7 @@ impl<'r> StreamingScanner<'r> {
             last_executed_rule: None,
             #[cfg(any(feature = "rules-profiling", feature = "logging"))]
             clock: quanta::Clock::new(),
+            offset_cache: None,
         };
 
         let mut wasm_store =
@@ -212,6 +215,20 @@ impl<'r> StreamingScanner<'r> {
     pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.timeout = Some(timeout);
         self
+    }
+
+    /// Enables the offset cache for storing input data by trace ID.
+    /// This allows offset-based data access across chunk boundaries.
+    pub fn enable_offset_cache(&mut self, cache_path: &str) -> Result<&mut Self, ScanError> {
+        match OffsetCache::new(cache_path) {
+            Ok(cache) => {
+                let cache_rc = Rc::new(cache);
+                // Update the wasm store context with the cache
+                self.wasm_store.data_mut().offset_cache = Some(cache_rc);
+                Ok(self)
+            }
+            Err(e) => Err(ScanError::Internal(format!("Failed to create offset cache: {}", e))),
+        }
     }
 
     /// Sets the value of a global variable.

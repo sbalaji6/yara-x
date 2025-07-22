@@ -47,6 +47,7 @@ mod context;
 mod matches;
 mod streaming;
 mod multi_stream;
+mod offset_cache;
 
 #[cfg(test)]
 mod tests;
@@ -111,6 +112,9 @@ pub enum ScanError {
         /// Error that occurred.
         err: ModuleError,
     },
+    /// Internal error.
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 /// Global counter that gets incremented every 1 second by a dedicated thread.
@@ -229,6 +233,7 @@ impl<'r> Scanner<'r> {
             last_executed_rule: None,
             #[cfg(any(feature = "rules-profiling", feature = "logging"))]
             clock: quanta::Clock::new(),
+            offset_cache: None,
         };
 
         // The ScanContext structure belongs to the WASM store, but at the same

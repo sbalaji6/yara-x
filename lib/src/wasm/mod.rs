@@ -1485,32 +1485,73 @@ macro_rules! gen_xint_fn {
             
             // In streaming mode, we need to handle global offsets correctly
             let ctx = caller.data();
+            
+            // Hybrid approach: First check if data is in current chunk
             let actual_offset = if ctx.global_scan_offset > 0 {
                 // We're in streaming mode - need to convert global offset to chunk-relative
                 let global_offset = offset;
                 
                 // Check if the requested global offset is within the current chunk
-                if global_offset < ctx.global_scan_offset as usize || 
-                   global_offset >= (ctx.global_scan_offset + ctx.scanned_data_len as u64) as usize {
-                    // Offset is outside current chunk - return None
-                    return None;
+                if global_offset >= ctx.global_scan_offset as usize && 
+                   global_offset < (ctx.global_scan_offset + ctx.scanned_data_len as u64) as usize {
+                    // Offset is within current chunk - convert to chunk-relative offset
+                    Some((global_offset as u64 - ctx.global_scan_offset) as usize)
+                } else {
+                    // Offset is outside current chunk
+                    None
                 }
-                
-                // Convert to chunk-relative offset
-                (global_offset as u64 - ctx.global_scan_offset) as usize
             } else {
                 // Regular scanning mode - use offset as-is
-                offset
+                Some(offset)
             };
             
-            caller
-                .data()
-                .scanned_data()
-                .get(actual_offset..actual_offset + mem::size_of::<$return_type>())
-                .map(|bytes| {
-                    <$return_type>::$from_fn(bytes.try_into().unwrap()) as i64
-                })
-                .map(|i| RangedInteger::<$min, $max>::new(i))
+            // If we have a chunk-relative offset, try to read from current chunk
+            if let Some(chunk_offset) = actual_offset {
+                let result = caller
+                    .data()
+                    .scanned_data()
+                    .get(chunk_offset..chunk_offset + mem::size_of::<$return_type>())
+                    .map(|bytes| {
+                        <$return_type>::$from_fn(bytes.try_into().unwrap()) as i64
+                    })
+                    .map(|i| RangedInteger::<$min, $max>::new(i));
+                
+                if result.is_some() {
+                    return result;
+                }
+            }
+            
+            // Data not in current chunk - try offset cache if available
+            let ctx = caller.data();
+            if let Some(ref cache) = ctx.offset_cache {
+                // Find a match at or near this offset to get its trace ID
+                for (_, match_list) in ctx.pattern_matches.iter() {
+                    for match_ in match_list.iter() {
+                        // Check if this match contains the requested offset
+                        if match_.range.start <= offset && offset < match_.range.end {
+                            if let Some(trace_id) = &match_.trace_id {
+                                // Try to get the line from cache
+                                if let Some(line_data) = cache.get(trace_id.as_str()) {
+                                    // Calculate offset within the line
+                                    // The match range is global, so we need to find where in the line our offset is
+                                    let offset_in_line = offset - match_.range.start;
+                                    
+                                    // Read the data from the cached line
+                                    return line_data
+                                        .get(offset_in_line..offset_in_line + mem::size_of::<$return_type>())
+                                        .map(|bytes| {
+                                            <$return_type>::$from_fn(bytes.try_into().unwrap()) as i64
+                                        })
+                                        .map(|i| RangedInteger::<$min, $max>::new(i));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // No data available at this offset
+            None
         }
     };
 }

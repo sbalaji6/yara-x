@@ -34,6 +34,7 @@ use crate::scanner::matches::{Match, PatternMatches, UnconfirmedMatch};
 use crate::scanner::ProfilingData;
 use crate::scanner::ScanError;
 use crate::scanner::HEARTBEAT_COUNTER;
+use crate::scanner::offset_cache::OffsetCache;
 use crate::types::{Array, Map, Struct};
 use crate::wasm::MATCHING_RULES_BITMAP_BASE;
 
@@ -133,6 +134,8 @@ pub(crate) struct ScanContext<'r> {
     /// Clock used for measuring the time spend on each pattern.
     #[cfg(any(feature = "rules-profiling", feature = "logging"))]
     pub clock: quanta::Clock,
+    /// Offset cache for storing input data by trace ID for offset-based access
+    pub offset_cache: Option<Rc<OffsetCache>>,
 }
 
 #[cfg(feature = "rules-profiling")]
@@ -749,6 +752,24 @@ impl ScanContext<'_> {
         // Only attempt if scanned_data is available (not null in streaming mode)
         if match_.trace_id.is_none() && !self.scanned_data.is_null() && self.scanned_data_len > 0 {
             match_.trace_id = extract_trace_id(self.scanned_data(), &match_.range);
+            
+            // If we have a trace_id and an offset cache, store the line data
+            if let (Some(ref trace_id), Some(ref cache)) = (&match_.trace_id, &self.offset_cache) {
+                // Find the start and end of the line containing the match
+                let mut line_start = match_.range.start;
+                while line_start > 0 && self.scanned_data()[line_start - 1] != b'\n' {
+                    line_start -= 1;
+                }
+                
+                let mut line_end = match_.range.end;
+                while line_end < self.scanned_data_len && self.scanned_data()[line_end] != b'\n' {
+                    line_end += 1;
+                }
+                
+                // Store the entire line in the cache
+                let line_data = &self.scanned_data()[line_start..line_end];
+                let _ = cache.put(trace_id, line_data);
+            }
         }
         
         // Adjust match offset for streaming scanner

@@ -273,6 +273,8 @@ wasmtime = { workspace = true, default-features = false, features = [
 x509-parser = { workspace = true, optional = true }
 yara-x-macros = { workspace = true }
 yara-x-parser = { workspace = true, features = ["serde"] }
+rusty-leveldb = { version = "3.0" }
+lru = { version = "0.12" }
 
 lingua = { version = "1.6.2", optional = true, default-features = false, features = ["english", "german", "french", "spanish"] }
 
