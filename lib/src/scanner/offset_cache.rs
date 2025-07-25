@@ -21,7 +21,9 @@ impl OffsetCache {
     pub fn new(db_path: impl AsRef<Path>) -> Result<Self, String> {
         let mut opts = Options::default();
         opts.create_if_missing = true;
-        opts.write_buffer_size = 128 * 1024 * 1024; // 128MB
+        opts.write_buffer_size = 128 * 1024 * 1024; // 128MB for write buffer
+        opts.block_cache_capacity_bytes = 256 * 1024 * 1024; // 256MB block cache for frequently accessed data
+        opts.block_size = 16 * 1024; // 16KB blocks (better for larger line data)
         
         let db = DB::open(db_path.as_ref(), opts)
             .map_err(|e| format!("Failed to open LevelDB: {:?}", e))?;
