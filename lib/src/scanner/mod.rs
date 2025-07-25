@@ -64,6 +64,9 @@ mod trace_id_test;
 #[cfg(test)]
 mod streaming_trace_id_test;
 
+#[cfg(test)]
+mod stream_local_dedup_test;
+
 pub use streaming::StreamingScanner;
 pub use multi_stream::MultiStreamScanner;
 
@@ -234,6 +237,9 @@ impl<'r> Scanner<'r> {
             #[cfg(any(feature = "rules-profiling", feature = "logging"))]
             clock: quanta::Clock::new(),
             offset_cache: None,
+            current_stream_id: None,
+            pattern_trace_ids: Rc::new(RefCell::new(HashMap::new())),
+            deduplication_enabled: false,
         };
 
         // The ScanContext structure belongs to the WASM store, but at the same

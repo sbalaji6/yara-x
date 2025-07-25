@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
@@ -125,6 +126,9 @@ impl<'r> StreamingScanner<'r> {
             #[cfg(any(feature = "rules-profiling", feature = "logging"))]
             clock: quanta::Clock::new(),
             offset_cache: None,
+            current_stream_id: None,
+            pattern_trace_ids: Rc::new(RefCell::new(HashMap::new())),
+            deduplication_enabled: false,
         };
 
         let mut wasm_store =

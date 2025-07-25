@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(feature = "rules-profiling")]
 use std::iter;
 #[cfg(feature = "rules-profiling")]
@@ -20,6 +20,7 @@ use protobuf::{MessageDyn, MessageFull};
 use regex_automata::meta::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use wasmtime::Store;
+use uuid::Uuid;
 
 use crate::compiler::{
     NamespaceId, PatternId, RegexpId, RuleId, Rules, SubPattern,
@@ -136,6 +137,12 @@ pub(crate) struct ScanContext<'r> {
     pub clock: quanta::Clock,
     /// Offset cache for storing input data by trace ID for offset-based access
     pub offset_cache: Option<Rc<OffsetCache>>,
+    /// Current stream ID
+    pub current_stream_id: Option<Uuid>,
+    /// Pattern trace IDs seen in current stream (for deduplication)
+    pub pattern_trace_ids: Rc<RefCell<HashMap<PatternId, HashSet<String>>>>,
+    /// Whether deduplication is enabled
+    pub deduplication_enabled: bool,
 }
 
 #[cfg(feature = "rules-profiling")]
@@ -408,6 +415,19 @@ impl ScanContext<'_> {
         match_: Match,
         replace_if_longer: bool,
     ) {
+        // Check stream-local deduplication if enabled and we have a trace ID
+        if self.deduplication_enabled {
+            if let Some(ref trace_id) = match_.trace_id {
+                let mut pattern_trace_ids = self.pattern_trace_ids.borrow_mut();
+                let trace_ids = pattern_trace_ids.entry(pattern_id).or_insert_with(HashSet::new);
+                
+                // If we've already seen this trace ID for this pattern in this stream, skip it
+                if !trace_ids.insert(trace_id.clone()) {
+                    return; // Already seen this trace ID for this pattern
+                }
+            }
+        }
+
         let wasm_store = unsafe { self.wasm_store.as_mut() };
         let mem = self.main_memory.unwrap().data_mut(wasm_store);
         let num_rules = self.compiled_rules.num_rules();
@@ -1104,7 +1124,13 @@ fn verify_full_word(
 
 /// Extracts the traceId from the matched line by finding the last string
 /// enclosed in double quotes.
-fn extract_trace_id(scanned_data: &[u8], match_range: &Range<usize>) -> Option<String> {
+/// 
+/// Enhanced to handle various edge cases:
+/// - Multiple quoted strings on the same line
+/// - Escaped quotes within strings
+/// - Empty quoted strings
+/// - Malformed quotes
+pub(crate) fn extract_trace_id(scanned_data: &[u8], match_range: &Range<usize>) -> Option<String> {
     // Find the start of the line containing the match
     let mut line_start = match_range.start;
     while line_start > 0 && scanned_data[line_start - 1] != b'\n' {
@@ -1125,24 +1151,49 @@ fn extract_trace_id(scanned_data: &[u8], match_range: &Range<usize>) -> Option<S
     let mut i = 0;
     while i < line.len() {
         if line[i] == b'"' {
-            let quote_start = i;
+            let _quote_start = i;
             i += 1;
-            // Find the closing quote
-            while i < line.len() && line[i] != b'"' {
-                // Handle escaped quotes
-                if line[i] == b'\\' && i + 1 < line.len() && line[i + 1] == b'"' {
-                    i += 2;
+            let mut quoted_content = Vec::new();
+            let mut found_closing_quote = false;
+            
+            // Find the closing quote, handling escapes
+            while i < line.len() {
+                if line[i] == b'\\' && i + 1 < line.len() {
+                    // Handle escape sequences
+                    if line[i + 1] == b'"' {
+                        // Escaped quote - add the quote character
+                        quoted_content.push(b'"');
+                        i += 2;
+                    } else if line[i + 1] == b'\\' {
+                        // Escaped backslash - add single backslash
+                        quoted_content.push(b'\\');
+                        i += 2;
+                    } else {
+                        // Other escape sequences - preserve as-is
+                        quoted_content.push(line[i]);
+                        quoted_content.push(line[i + 1]);
+                        i += 2;
+                    }
+                } else if line[i] == b'"' {
+                    // Found closing quote
+                    found_closing_quote = true;
+                    i += 1;
+                    break;
                 } else {
+                    // Regular character
+                    quoted_content.push(line[i]);
                     i += 1;
                 }
             }
-            if i < line.len() && line[i] == b'"' {
+            
+            if found_closing_quote {
                 // Found a complete quoted string
-                let quoted_content = &line[quote_start + 1..i];
-                if let Ok(s) = std::str::from_utf8(quoted_content) {
-                    last_quoted_string = Some(s.to_string());
+                if let Ok(s) = std::str::from_utf8(&quoted_content) {
+                    // Only update if the string is non-empty and valid
+                    if !s.is_empty() {
+                        last_quoted_string = Some(s.to_string());
+                    }
                 }
-                i += 1;
             }
         } else {
             i += 1;

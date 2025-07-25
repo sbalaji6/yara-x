@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
@@ -63,6 +63,8 @@ struct StreamContext {
     /// WASM memory bitmaps for rules and patterns
     rule_bitmap: Vec<u8>,
     pattern_bitmap: Vec<u8>,
+    /// Track unique trace IDs seen for each pattern in this stream
+    pattern_trace_ids: Rc<RefCell<HashMap<PatternId, HashSet<String>>>>,
 }
 
 impl StreamContext {
@@ -80,6 +82,7 @@ impl StreamContext {
             global_scan_offset: 0,
             rule_bitmap: vec![0; num_rules.div_ceil(8)],
             pattern_bitmap: vec![0; num_patterns.div_ceil(8)],
+            pattern_trace_ids: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -184,6 +187,8 @@ pub struct MultiStreamScanner<'r> {
     rule_match_callback: Option<RuleMatchCallback>,
     /// Offset cache for storing input data by trace ID
     offset_cache: Option<Rc<OffsetCache>>,
+    /// Enable trace ID deduplication
+    deduplication_enabled: bool,
 }
 
 impl<'r> MultiStreamScanner<'r> {
@@ -224,6 +229,9 @@ impl<'r> MultiStreamScanner<'r> {
             #[cfg(any(feature = "rules-profiling", feature = "logging"))]
             clock: quanta::Clock::new(),
             offset_cache: None,
+            current_stream_id: None,
+            pattern_trace_ids: Rc::new(RefCell::new(HashMap::new())),
+            deduplication_enabled: false,
         };
 
         let mut wasm_store =
@@ -310,12 +318,31 @@ impl<'r> MultiStreamScanner<'r> {
             modules_initialized: false,
             rule_match_callback: None,
             offset_cache: None,
+            deduplication_enabled: false,
         }
     }
 
     /// Sets a timeout for scan operations.
     pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.timeout = Some(timeout);
+        self
+    }
+    
+    /// Enables trace ID deduplication for the scanner.
+    /// 
+    /// When enabled, the scanner will only report matches with trace IDs that haven't been
+    /// seen before within each stream. This helps reduce noise when the same error appears
+    /// multiple times in a log file.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// # use yara_x::MultiStreamScanner;
+    /// # let rules = yara_x::compile("rule test { condition: true }").unwrap();
+    /// let mut scanner = MultiStreamScanner::new(&rules);
+    /// scanner.enable_deduplication(true);
+    /// ```
+    pub fn enable_deduplication(&mut self, enabled: bool) -> &mut Self {
+        self.deduplication_enabled = enabled;
         self
     }
     
@@ -501,7 +528,7 @@ impl<'r> MultiStreamScanner<'r> {
             
             // Process all non-private matching rules
             for rule_id in &ctx.non_private_matching_rules {
-                // Collect trace IDs for this rule
+                // Collect unique trace IDs for this rule
                 let mut trace_ids = std::collections::HashSet::new();
                 let rule_info = self.rules.get(*rule_id);
                 
@@ -601,6 +628,17 @@ impl<'r> MultiStreamScanner<'r> {
         }
 
         self.active_stream = Some(*stream_id);
+        
+        // Update the context with current stream ID and pattern trace IDs
+        let ctx = self.wasm_store.data_mut();
+        ctx.current_stream_id = Some(*stream_id);
+        ctx.deduplication_enabled = self.deduplication_enabled;
+        
+        // Set the pattern_trace_ids from the stream context
+        if let Some(stream_context) = self.contexts.get(stream_id) {
+            ctx.pattern_trace_ids = stream_context.pattern_trace_ids.clone();
+        }
+        
         Ok(())
     }
 

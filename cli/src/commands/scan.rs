@@ -189,6 +189,11 @@ pub fn scan() -> Command {
                 .help("Abort scanning after the given number of seconds")
                 .value_parser(value_parser!(u64).range(1..))
         )
+        .arg(
+            arg!(--"dedup-trace-ids")
+                .help("Enable trace ID deduplication across streams")
+                .long_help("When enabled, only report matches with trace IDs that haven't been seen before. This helps reduce noise when scanning multiple log files that may contain the same errors.")
+        )
 
 }
 
@@ -275,6 +280,16 @@ pub fn exec_scan(args: &ArgMatches, config: &Config) -> anyhow::Result<()> {
         bail!(
             "can't use '{}' when <TARGET_PATH> is a file",
             Paint::bold("--recursive")
+        );
+    }
+
+    // Check if deduplication is requested
+    let dedup_trace_ids = args.get_flag("dedup-trace-ids");
+    if dedup_trace_ids {
+        eprintln!(
+            "{}: Trace ID deduplication is not yet implemented in the CLI. \
+            This feature is currently only available when using the MultiStreamScanner API.",
+            Paint::yellow("warning")
         );
     }
 
